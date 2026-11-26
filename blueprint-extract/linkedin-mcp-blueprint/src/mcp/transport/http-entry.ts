@@ -14,6 +14,19 @@ import { createMcpHandler } from '@modelcontextprotocol/server';
 
 const log = createLogger('entry:http');
 
+/**
+ * Request-body cap at the bridge. The SDK handler's own bound applies only
+ * to bodies it reads itself; a pre-built Request bypasses it, so the node:http
+ * layer must enforce its own limit. 4 MiB mirrors the SDK default.
+ */
+const MAX_BODY_BYTES = 4_194_304;
+
+function isMcpRoute(url: string | undefined): boolean {
+  if (url === undefined) return false;
+  const path = url.split('?')[0] ?? '';
+  return path === '/mcp' || path === '/mcp/';
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
   const handler = createMcpHandler(() => createMcpServer(config), {
@@ -23,15 +36,30 @@ async function main(): Promise<void> {
   });
 
   const server = createServer((req, res) => {
-    if (!req.url?.startsWith('/mcp')) {
+    if (!isMcpRoute(req.url)) {
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'not found' }));
       return;
     }
     // Bridge node req/res to the web-standard handler.
     const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
+    let size = 0;
+    let oversized = false;
+    req.on('data', (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        oversized = true;
+        // Stop absorbing the body; drain the socket without buffering.
+        chunks.length = 0;
+        req.removeAllListeners('data');
+        res.writeHead(413, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'payload too large' }));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => {
+      if (oversized) return;
       const url = `http://${config.HTTP_HOST}:${String(config.HTTP_PORT)}${req.url ?? ''}`;
       const headers = new Headers();
       for (const [k, v] of Object.entries(req.headers)) {
@@ -53,6 +81,9 @@ async function main(): Promise<void> {
           res.writeHead(500, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ error: 'internal' }));
         });
+    });
+    req.on('error', (err: Error) => {
+      log.warn('request stream error', { error: err.message });
     });
   });
 
