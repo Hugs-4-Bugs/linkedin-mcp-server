@@ -27,7 +27,12 @@ describe('stdio transport E2E (child process)', () => {
 
   it('lists the status tool', async () => {
     const tools = await client.listTools();
-    expect(tools.tools.map((t) => t.name)).toEqual(['status']);
+    expect(tools.tools.map((t) => t.name)).toEqual([
+      'status',
+      'linkedin_connect',
+      'linkedin_status',
+      'linkedin_disconnect',
+    ]);
   });
 
   it('calls status over stdio', async () => {

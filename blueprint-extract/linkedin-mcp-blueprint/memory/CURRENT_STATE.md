@@ -1,15 +1,21 @@
 # Current State
 
-**2026-11-26 — M1 VERIFICATION GATE PASSED (owner-ordered). M2 (LinkedIn OAuth, mock-driven) IN PROGRESS.**
+**2026-11-26 — MILESTONE 2 (LinkedIn OAuth foundation, mock-driven) COMPLETE & VERIFIED. Next: Milestone 3 (read tools).**
 
-## Phase 0 → approval → M1 → gate timeline
+## Phase 0 → approval → M1 → gate → M2 timeline
 
 - Phase 0 audit complete (report: `/home/z/my-project/download/PHASE_0_REPORT.md`).
 - Owner approved with decisions D-A1…D-A10 (recorded in `memory/DECISIONS.md`).
-- Condition-10 baseline updates done: `08_WORKFLOW/IMPL_PLAN.md` (pinned deps, environments, milestones), ADR-005…012 in `02_ARCHITECTURE/ARCHITECTURE_DECISION_RECORDS.md`, task board updated.
-- M1 implemented and verified 2026-11-26 (see PROGRESS_TRACKER.md for command evidence).
-- **Owner M1 gate (2026-11-26): PASSED.** Verified git (branch `main`, HEAD `c94ee37`, parent `f601063`, clean tree, commit files present), re-ran full pipeline, inspected security groundwork, probed loopback/stdout boundaries behaviorally. Findings FIXED during gate: unbounded HTTP body buffering (HIGH) → 4 MiB cap + 413; `/mcp` prefix-squat → exact route match; added `tests/security/gate-regressions.test.ts` (5 tests). Suite now **31/31, 6 files**; audit 0/0; secret scan clean. ToolPolicy remains type-level (enforcement lands in M2 registration sites, as planned). M1 status: accepted-provisional→verified.
-- **M2 directive (owner): mock OAuth providers and tests — do NOT require owner credentials to implement/test the OAuth foundation.** No scope expansion, no pinned-dep changes, no M3 work. Stop at M2 boundary with handoff report.
+- Condition-10 baseline updates done: `08_WORKFLOW/IMPL_PLAN.md`, ADR-005…012.
+- M1 implemented and verified 2026-11-26; owner gate PASSED (findings fixed: body cap + 413, exact route match; loopback + stdout-wire behavioral tests added).
+- **M2 implemented and verified 2026-11-26, mock OAuth per owner directive (no credentials required).**
+  - `OAUTH_PROVIDER=mock|linkedin` config (linkedin requires full credential triple — config-enforced).
+  - `src/auth/linkedin/`: state store (CSRF, single-use, TTL, tenant-bound, timing-safe), AES-256-GCM token vault (in-memory; 32-byte key validated; ephemeral dev key logged-warn), real 3LO adapter (injected fetch; errors mapped, body never leaked) + mock provider (single-use codes), connection service (connect/rate-limit 6 per 10 min/callback/status/disconnect; 60-day expiry).
+  - Tools: `linkedin_connect`, `linkedin_status`, `linkedin_disconnect` (schema-forced `confirm: true` gate) registered through policy specs.
+  - HTTP routes: `GET /linkedin/connect` (303), `GET /linkedin/callback` (400/200/502 paths), `GET /mock/linkedin/authorize` (mock consent, mock provider only).
+  - Security fix during M2: logger redaction extended to OAuth `state`/`code` keys (caught by new hygiene tests).
+  - **Suite: 75/75 tests, 10 files** (18 OAuth-foundation, 14 connection service, 6 OAuth-flow E2E over compiled HTTP entry, 4 secret hygiene, plus all M1/M1-gate tests). typecheck ✅ lint ✅ build ✅ audit 0/0 (all+prod) ✅ secret scan ✅.
+- Owner directives honored: no scope expansion, pinned deps unchanged (`npm ls` = exact pins), no M3 work started, stopped at M2 boundary with HANDOFF_M2.md.
 
 ## M1 facts (verified)
 

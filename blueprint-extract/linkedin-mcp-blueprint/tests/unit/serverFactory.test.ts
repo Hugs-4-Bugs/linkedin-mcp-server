@@ -7,14 +7,14 @@ import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { parseConfig } from '../../src/config/config.js';
-import { createMcpServer } from '../../src/mcp/serverFactory.js';
+import { buildRuntime, createMcpServer } from '../../src/mcp/serverFactory.js';
 
 const config = parseConfig({ ENVIRONMENT: 'local' });
 
 async function withClient(
   fn: (client: Client) => Promise<void>,
 ): Promise<void> {
-  const server = createMcpServer(config);
+  const server = createMcpServer(buildRuntime(config));
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
   const client = new Client({ name: 'test', version: '1.0.0' });
@@ -28,16 +28,22 @@ async function withClient(
 }
 
 describe('tool catalog (in-memory transport)', () => {
-  it('exposes exactly the status tool', async () => {
+  it('exposes the M2 catalog: status + connection lifecycle tools', async () => {
     await withClient(async (client) => {
       const tools = await client.listTools();
-      expect(tools.tools.map((t) => t.name)).toEqual(['status']);
-      const status = tools.tools[0];
-      expect(status?.description).toBeTruthy();
+      expect(tools.tools.map((t) => t.name)).toEqual([
+        'status',
+        'linkedin_connect',
+        'linkedin_status',
+        'linkedin_disconnect',
+      ]);
+      for (const t of tools.tools) {
+        expect(t.description?.length ?? 0).toBeGreaterThan(10);
+      }
     });
   });
 
-  it('status returns structured server identity', async () => {
+  it('status returns structured server identity with mock provider', async () => {
     await withClient(async (client) => {
       const res = await client.callTool({ name: 'status', arguments: {} });
       expect(res.isError).toBeFalsy();
@@ -49,7 +55,26 @@ describe('tool catalog (in-memory transport)', () => {
       >;
       expect(parsed.server).toBe('linkedin-mcp-server');
       expect(parsed.environment).toBe('local');
-      expect(parsed.linkedin).toBe('not-configured');
+      expect(parsed.oauthProvider).toBe('mock');
+      expect(parsed.linkedin).toBe('not-connected');
+    });
+  });
+
+  it('linkedin_status reports disconnected before any flow', async () => {
+    await withClient(async (client) => {
+      const res = await client.callTool({ name: 'linkedin_status', arguments: {} });
+      expect(res.isError).toBeFalsy();
+      const text = res.content[0] as { type: 'text'; text: string };
+      const parsed = JSON.parse(text.text) as Record<string, unknown>;
+      expect(parsed.connected).toBe(false);
+      expect(parsed.expiresAt).toBeNull();
+    });
+  });
+
+  it('linkedin_disconnect without confirm=true is rejected by schema', async () => {
+    await withClient(async (client) => {
+      const res = await client.callTool({ name: 'linkedin_disconnect', arguments: {} });
+      expect(res.isError).toBe(true);
     });
   });
 

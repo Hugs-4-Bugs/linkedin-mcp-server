@@ -7,7 +7,7 @@
  */
 import { loadConfig } from '../../config/config.js';
 import { createLogger } from '../../observability/logger.js';
-import { createMcpServer } from '../serverFactory.js';
+import { buildRuntime, createMcpServer } from '../serverFactory.js';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 
 const log = createLogger('entry:stdio');
@@ -20,7 +20,8 @@ function main(): void {
     });
     process.exit(1);
   }
-  serveStdio(() => createMcpServer(config), {
+  const runtime = buildRuntime(config);
+  serveStdio(() => createMcpServer(runtime), {
     onerror: (err) => {
       log.error('stdio server error', { error: err.message });
     },

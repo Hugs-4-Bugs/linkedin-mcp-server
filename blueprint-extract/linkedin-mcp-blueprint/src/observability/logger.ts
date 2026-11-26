@@ -11,11 +11,16 @@
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 const SECRET_KEY_RE =
-  /(token|secret|password|authorization|cookie|api[-_]?key|client[-_]?secret|refresh|credential)/i;
+  /(token|secret|password|authorization|cookie|api[-_]?key|client[-_]?secret|refresh|credential|state|code)/i;
 
-/** Keys whose values must never be logged verbatim. */
+/**
+ * Keys whose values must never be logged verbatim. `state`/`code` are OAuth
+ * flow credentials (CSRF token / one-time grant); `code` matching is exact-key
+ * only, since generic "code" fields elsewhere are often non-secret.
+ */
 const BANNED_KEYS = new Set([
-  'authorization', 'access_token', 'client_secret', 'password', 'cookie', 'code',
+  'authorization', 'access_token', 'client_secret', 'password', 'cookie',
+  'code', 'state', 'authorizationcode', 'authorization_code', 'authcode',
 ]);
 
 function redactValue(key: string, value: unknown): unknown {

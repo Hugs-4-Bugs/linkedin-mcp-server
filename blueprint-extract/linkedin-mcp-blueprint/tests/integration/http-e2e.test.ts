@@ -63,7 +63,12 @@ describe('HTTP transport E2E (loopback)', () => {
     });
     expect(resp.status).toBe(200);
     const json = (await resp.json()) as { result?: { tools?: { name: string }[] } };
-    expect(json.result?.tools?.map((t) => t.name)).toEqual(['status']);
+    expect(json.result?.tools?.map((t) => t.name)).toEqual([
+      'status',
+      'linkedin_connect',
+      'linkedin_status',
+      'linkedin_disconnect',
+    ]);
   });
 
   it('calls status and returns structured identity', async () => {

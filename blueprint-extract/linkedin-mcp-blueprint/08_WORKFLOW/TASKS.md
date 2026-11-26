@@ -6,8 +6,8 @@
 - [x] T0.4 Confirm architecture, hosting and cost proposal with owner — DONE 2026-11-26: owner approved Phase 0 with decisions D-A1…D-A10 (recorded in memory/DECISIONS.md). Baseline updates completed per condition 10: 08_WORKFLOW/IMPL_PLAN.md (pinned deps, environments, milestones) + ADR-005…012. Hosting/cost recommendation doc due at M5 (D-A4); Community Management API deferred (D-A5).
 - [x] T1.1 Set up repository, strict TS, CI and tests — DONE 2026-11-26 (M1). Evidence: typecheck/lint/build/26 tests/audit-0-vulns/secret-scan-clean; see PROGRESS_TRACKER.md. CI config itself deferred until repo hosting/remote is decided (owner Q2/D-A4); local `npm run verify` is the gate meanwhile.
 - [x] T1.2 MCP transport prototype and protocol tests — DONE 2026-11-26 (M1). stdio + streamable HTTP entries; 26-test suite incl. transport E2E and negative protocol cases (404/406/400 Mcp-Method/Mcp-Name mismatch).
-- [ ] T2.1 OAuth connection and lifecycle (verified flow)
-- [ ] T2.2 Secure persistence and tenant context
+- [x] T2.1 OAuth connection and lifecycle (verified flow) — DONE 2026-11-26 (M2, mock provider per owner directive). Full 3LO: state store (CSRF, single-use, TTL, tenant-bound), AES-256-GCM token vault, mock+real providers, connect/status/disconnect tools, HTTP routes, 75-test suite. Evidence: PROGRESS_TRACKER.md.
+- [ ] T2.2 Secure persistence and tenant context — PARTIAL per plan: in-memory vault + tenant isolation landed in M2 (T2.1); Postgres-backed persistence + retention classes remain M5 (staging). NOT claimed complete.
 - [ ] T3.1 Implement verified read tools
 - [ ] T3.2 Implement approved write tools if available and explicitly scoped
 - [ ] T4.1 Claude compatibility testing

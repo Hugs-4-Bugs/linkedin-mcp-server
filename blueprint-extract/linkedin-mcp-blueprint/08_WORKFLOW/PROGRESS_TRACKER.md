@@ -18,6 +18,7 @@
 | 2026-11-26 | M1 foundation code | DONE | src/ (config, logger, toolPolicy, serverFactory, stdio+http entries) | TS strict flags: noUncheckedIndexedAccess, exactOptionalPropertyTypes |
 | 2026-11-26 | T1.1 + T1.2 | DONE | `npm run verify` full pipeline | **Commands + observed results:** typecheck ✅ · lint ✅ · build ✅ · vitest **26/26 tests, 5 files** ✅ · `npm audit` (all deps) **0 vulnerabilities** ✅ · secret-scan **clean** ✅ |
 | 2026-11-26 | **M1 verification gate** (owner-ordered) | DONE | git + probes + re-run pipeline | branch `main`, HEAD `c94ee37`, parent `f601063`, clean tree; c94ee37 in history w/ 113 files; loopback refusal + stdout wire purity probed; **findings fixed:** HIGH unbounded body buffering → 4 MiB cap + 413, `/mcp` prefix-squat → exact match; suite **31/31, 6 files**; audit 0/0; scan clean |
+| 2026-11-26 | **M2 OAuth foundation** (mock-driven per owner directive) | DONE | full pipeline, see below | state store + AES-256-GCM vault + mock/real providers + connection service + 3 tools + OAuth routes; redaction extended to state/code; **75/75 tests, 10 files**; audit 0/0; scan clean |
 
 ## M1 verification evidence (2026-11-26, observed output)
 
@@ -35,5 +36,13 @@
 - Behavioral probes: local+0.0.0.0 → process exit 1, `HTTP_HOST: local environment must bind loopback` BEFORE listening; staging+0.0.0.0 → listen succeeds; raw stdio wire probe → `stdout lines=3 non-framing=0 STDOUT-WIRE-PURE`.
 - Gate fixes (items 6+7): HTTP bridge body cap 4 MiB + 413 (was unbounded buffering — HIGH); exact `/mcp` route match (was prefix-squat); new `tests/security/gate-regressions.test.ts` (5 tests: loopback exit, parseConfig both envs, wire purity, 413, route exactness incl. `/mcp?query` → 405).
 - Final gate pipeline: typecheck ✅ · lint ✅ · build ✅ · vitest **31/31 tests, 6 files** ✅ · npm audit 0 vulns (all+prod) ✅ · secret scan clean ✅.
+
+## M2 verification evidence (2026-11-26, observed output)
+
+- `npm run typecheck` → exit 0; `npx eslint .` → exit 0, no findings; `npm run build` → dist/ emitted incl. `src/auth/linkedin/*`, `src/tools/*`, `src/identity/*`, `src/usage/*`.
+- `npx vitest run` → "Test Files 10 passed (10) / Tests 75 passed (75)" — including: OAuth state store (6: single-use, TTL, tenant-bound, forged), vault (6: seal/unseal, tenant isolation, ciphertext canary, key validation), bucket (2), authorize gate (4), connection service (14: full happy path, forged state, replay, expired tokens, rate limit per-tenant, disconnect), real provider w/ injected fetch (5: URL shape, token exchange, error mapping without body leak, network, malformed), **mock 3LO E2E over compiled HTTP entry (6: connect→consent→callback→connected, confirmation gate, forged 400, replay 400, 429 rate limit)**, secret hygiene (4).
+- Security fix found BY tests: logger redaction now covers `state`/`code` keys (was missing; caught by oauth-hygiene canary test).
+- `npm audit` + `--omit=dev` → 0 vulnerabilities; `npm run scan:secrets` → clean; `npm ls --depth=0` → exact pinned versions (no dep changes).
+- Directives honored: no scope expansion; no pinned-dep changes; M3 not started.
 
 Update after every task with date, commit, status, test evidence, blockers and next task.
