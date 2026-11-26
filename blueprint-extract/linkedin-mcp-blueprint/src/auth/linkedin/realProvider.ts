@@ -6,16 +6,26 @@
 import {
   LINKEDIN_AUTHORIZATION_ENDPOINT,
   LINKEDIN_TOKEN_ENDPOINT,
+  LINKEDIN_USERINFO_ENDPOINT,
   ProviderError,
   type AuthorizeUrlInput,
   type LinkedInOAuthProvider,
   type OAuthResult,
   type TokenExchangeInput,
+  type UserInfoInput,
+  type UserInfoResponse,
 } from './provider.js';
 import type { TokenSet } from './tokenVault.js';
+import { validateUserInfo, UserinfoValidationError } from './userinfoSchema.js';
+
+/** Default provider call timeout (ms). 401/403 from userinfo = revocation. */
+export const USERINFO_TIMEOUT_MS = 10_000;
 
 export class LinkedInRealProvider implements LinkedInOAuthProvider {
-  constructor(private readonly fetchImpl: typeof fetch = globalThis.fetch) {}
+  constructor(
+    private readonly fetchImpl: typeof fetch = globalThis.fetch,
+    private readonly userinfoTimeoutMs: number = USERINFO_TIMEOUT_MS,
+  ) {}
 
   buildAuthorizeUrl(input: AuthorizeUrlInput): string {
     const url = new URL(LINKEDIN_AUTHORIZATION_ENDPOINT);
@@ -75,10 +85,59 @@ export class LinkedInRealProvider implements LinkedInOAuthProvider {
     };
     return {
       ...tokens,
-      // Real member id resolution (OIDC userinfo) lands with the read tools
-      // milestone; the connect flow stores the token set with a placeholder
-      // memberId derived from nothing sensitive: 'pending' until M3 fetch.
+      // Member id resolution happens at callback time via getUserInfo()
+      // when the profile capability first runs; until then 'pending'.
       memberId: 'pending',
     };
+  }
+
+  async getUserInfo(input: UserInfoInput): Promise<UserInfoResponse> {
+    let resp: Response;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, this.userinfoTimeoutMs);
+    try {
+      resp = await this.fetchImpl(LINKEDIN_USERINFO_ENDPOINT, {
+        method: 'GET',
+        headers: {
+          authorization: `Bearer ${input.accessToken}`,
+          accept: 'application/json',
+        },
+        signal: controller.signal,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        throw new ProviderError('timeout', 'userinfo endpoint timed out');
+      }
+      throw new ProviderError(
+        'network',
+        `userinfo endpoint unreachable: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      clearTimeout(timer); // eslint no-confusing-void: expression statement
+    }
+    if (resp.status === 401 || resp.status === 403) {
+      // token expired/revoked or scopes insufficient: never echo the body
+      throw new ProviderError('http-status', `userinfo returned ${String(resp.status)} (token expired/revoked or insufficient scope)`, resp.status);
+    }
+    if (resp.status !== 200) {
+      throw new ProviderError('http-status', `userinfo endpoint returned ${String(resp.status)}`, resp.status);
+    }
+    let parsed: unknown;
+    try {
+      parsed = await resp.json();
+    } catch {
+      throw new ProviderError('invalid-response', 'userinfo endpoint returned non-JSON body');
+    }
+    try {
+      return validateUserInfo(parsed);
+    } catch (err) {
+      if (err instanceof UserinfoValidationError) {
+        // reason only — the offending value never leaves this module
+        throw new ProviderError('invalid-response', `userinfo schema violation: ${err.message}`);
+      }
+      throw err;
+    }
   }
 }

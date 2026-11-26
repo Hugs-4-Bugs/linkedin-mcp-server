@@ -1,6 +1,6 @@
 # Current State
 
-**2026-11-26 — MILESTONE 2 (LinkedIn OAuth foundation, mock-driven) COMPLETE & VERIFIED. Next: Milestone 3 (read tools).**
+**2026-11-26 — MILESTONE 3 (identity & granted-scope verification, mock-driven) COMPLETE & VERIFIED. Next: Milestone 4 (post tools) — NOT started, awaiting owner.**
 
 ## Phase 0 → approval → M1 → gate → M2 timeline
 
@@ -16,6 +16,15 @@
   - Security fix during M2: logger redaction extended to OAuth `state`/`code` keys (caught by new hygiene tests).
   - **Suite: 75/75 tests, 10 files** (18 OAuth-foundation, 14 connection service, 6 OAuth-flow E2E over compiled HTTP entry, 4 secret hygiene, plus all M1/M1-gate tests). typecheck ✅ lint ✅ build ✅ audit 0/0 (all+prod) ✅ secret scan ✅.
 - Owner directives honored: no scope expansion, pinned deps unchanged (`npm ls` = exact pins), no M3 work started, stopped at M2 boundary with HANDOFF_M2.md.
+
+## M3 (2026-11-26) — profile + granted-scope verification, mock-driven
+
+- **`linkedin_get_my_profile`**: OIDC `GET /v2/userinfo` with the tenant's sealed token; strict permitted-field allowlist (`sub,name,given_name,family_name,email,email_verified,locale,picture` — unexpected fields REJECTED); safe structured errors (`not-connected`/`expired`/`insufficient-scopes`/`provider-*`); real provider: injected fetch, AbortController timeout 10s, 401/403→reconnect guidance, no body leakage; mock: deterministic fixtures that must pass validation themselves; foreign tokens 401.
+- **`linkedin_list_granted_scopes`**: truth model — requested vs `tokenScopeClaim` (token-exchange response only) vs `unverified` (no claim), missing/matched, connectionState; explicit note that LinkedIn self-serve has NO introspection endpoint (ADR-013). Requested is never presented as granted.
+- **Security tests (17-case matrix)** incl. cross-tenant isolation, no-args schema (identity substitution impossible by construction), token non-leakage canaries, 10-way concurrent profile calls, timeout, mock restrictions.
+- **Fix during M3**: expired vs not-connected now distinct error codes; tool clock injectable.
+- **Suite 109/109 tests, 13 files**; typecheck/lint/build/audit 0/0/secret-scan clean; pinned deps unchanged; ADR-013 + ADR-014 recorded.
+- **LIVE LinkedIn validation NOT performed** (no app credentials — owner-gated; real provider is unit-tested against injected fetch only). Stopped at M3 boundary with HANDOFF_M3.md; no M4 work started.
 
 ## M1 facts (verified)
 

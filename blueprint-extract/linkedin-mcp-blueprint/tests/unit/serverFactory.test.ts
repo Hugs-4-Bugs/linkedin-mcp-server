@@ -36,6 +36,8 @@ describe('tool catalog (in-memory transport)', () => {
         'linkedin_connect',
         'linkedin_status',
         'linkedin_disconnect',
+        'linkedin_get_my_profile',
+        'linkedin_list_granted_scopes',
       ]);
       for (const t of tools.tools) {
         expect(t.description?.length ?? 0).toBeGreaterThan(10);

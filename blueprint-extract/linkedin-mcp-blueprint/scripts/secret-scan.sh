@@ -14,8 +14,10 @@ PATTERNS=(
   'ey[A-Za-z0-9_-]{20,}\.ey[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}' # JWT triple
 )
 
-# Scan only git-tracked files, plus config files that must never hold real values.
-mapfile -t FILES < <(git ls-files; echo .env; echo .env.local 2>/dev/null)
+# Scan tracked AND untracked-but-present working files (a pre-commit run must
+# see new files not yet staged — git ls-files alone gave a false clean once);
+# ignored paths stay out via git check-ignore. Plus always-present env files.
+mapfile -t FILES < <(git ls-files --cached --others --exclude-standard; echo .env; echo .env.local 2>/dev/null)
 
 status=0
 for pat in "${PATTERNS[@]}"; do

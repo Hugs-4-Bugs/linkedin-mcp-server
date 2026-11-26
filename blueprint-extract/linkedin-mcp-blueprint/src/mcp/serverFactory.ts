@@ -19,6 +19,7 @@ import { LinkedInConnectionService } from '../auth/linkedin/connectionService.js
 import { InMemoryTokenVault, generateVaultKey } from '../auth/linkedin/tokenVault.js';
 import { LinkedInMockProvider } from '../auth/linkedin/mockProvider.js';
 import { LinkedInRealProvider } from '../auth/linkedin/realProvider.js';
+import type { LinkedInOAuthProvider } from '../auth/linkedin/provider.js';
 import type { ToolContext } from '../tools/toolContext.js';
 import {
   CONNECTION_TOOL_SPECS,
@@ -26,6 +27,12 @@ import {
   disconnectTool,
   statusTool,
 } from '../tools/connectionTools.js';
+import {
+  PROFILE_TOOL_SPEC,
+  SCOPE_TOOL_SPEC,
+  getMyProfileTool,
+  listGrantedScopesTool,
+} from '../tools/profileTools.js';
 
 const log = createLogger('mcp:server');
 
@@ -47,6 +54,8 @@ export interface AppRuntime {
   connection: LinkedInConnectionService;
   vault: InMemoryTokenVault;
   callBudgets: BucketRegistry;
+  /** OAuth provider in use (mock or real); tools receive it via ToolContext. */
+  provider: LinkedInOAuthProvider;
   /** Present only when OAUTH_PROVIDER=mock (route-level mock consent flow). */
   mockProvider: LinkedInMockProvider | undefined;
 }
@@ -73,6 +82,7 @@ export function buildRuntime(config: AppConfig): AppRuntime {
     connection,
     vault,
     callBudgets: new BucketRegistry({ capacity: 60, windowMs: 86_400_000 }), // LinkedIn share ceiling shape
+    provider,
     mockProvider: config.OAUTH_PROVIDER === 'mock' ? (provider as LinkedInMockProvider) : undefined,
   } satisfies AppRuntime;
 }
@@ -84,6 +94,8 @@ function toolContext(runtime: AppRuntime): ToolContext {
     connection: runtime.connection,
     callBudget: runtime.callBudgets.for(`linkedin-calls:${runtime.tenant.tenantId}`),
     vault: runtime.vault,
+    provider: runtime.provider,
+    now: () => Date.now(),
   };
 }
 
@@ -145,6 +157,39 @@ function registerConnectionTools(server: McpServer, runtime: AppRuntime): void {
   }
 }
 
+/**
+ * Register the M3 profile/scope tools. get_my_profile is identity-dependent:
+ * its handler gates on live connection state via authorize() and sources the
+ * identity from the tenant's sealed token — arguments cannot supply one.
+ */
+function registerProfileTools(server: McpServer, runtime: AppRuntime): void {
+  const ctx = toolContext(runtime);
+  server.registerTool(
+    PROFILE_TOOL_SPEC.name,
+    {
+      title: PROFILE_TOOL_SPEC.title,
+      description: PROFILE_TOOL_SPEC.description,
+      inputSchema: PROFILE_TOOL_SPEC.inputSchema,
+    },
+    async () => {
+      const r = await getMyProfileTool(ctx);
+      return r as unknown as { content: { type: 'text'; text: string }[] };
+    },
+  );
+  server.registerTool(
+    SCOPE_TOOL_SPEC.name,
+    {
+      title: SCOPE_TOOL_SPEC.title,
+      description: SCOPE_TOOL_SPEC.description,
+      inputSchema: SCOPE_TOOL_SPEC.inputSchema,
+    },
+    async () => {
+      const r = await listGrantedScopesTool(ctx);
+      return r as unknown as { content: { type: 'text'; text: string }[] };
+    },
+  );
+}
+
 export function createMcpServer(runtime: AppRuntime): McpServer {
   const server = new McpServer({
     name: runtime.config.SERVER_NAME,
@@ -155,5 +200,6 @@ export function createMcpServer(runtime: AppRuntime): McpServer {
   });
   registerStatusTool(server, runtime);
   registerConnectionTools(server, runtime);
+  registerProfileTools(server, runtime);
   return server;
 }

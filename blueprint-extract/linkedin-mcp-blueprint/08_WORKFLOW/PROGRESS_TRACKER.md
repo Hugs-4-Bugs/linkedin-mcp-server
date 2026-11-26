@@ -19,6 +19,7 @@
 | 2026-11-26 | T1.1 + T1.2 | DONE | `npm run verify` full pipeline | **Commands + observed results:** typecheck ✅ · lint ✅ · build ✅ · vitest **26/26 tests, 5 files** ✅ · `npm audit` (all deps) **0 vulnerabilities** ✅ · secret-scan **clean** ✅ |
 | 2026-11-26 | **M1 verification gate** (owner-ordered) | DONE | git + probes + re-run pipeline | branch `main`, HEAD `c94ee37`, parent `f601063`, clean tree; c94ee37 in history w/ 113 files; loopback refusal + stdout wire purity probed; **findings fixed:** HIGH unbounded body buffering → 4 MiB cap + 413, `/mcp` prefix-squat → exact match; suite **31/31, 6 files**; audit 0/0; scan clean |
 | 2026-11-26 | **M2 OAuth foundation** (mock-driven per owner directive) | DONE | full pipeline, see below | state store + AES-256-GCM vault + mock/real providers + connection service + 3 tools + OAuth routes; redaction extended to state/code; **75/75 tests, 10 files**; audit 0/0; scan clean |
+| 2026-11-26 | **M3 profile + granted-scope verification** (mock/fixtures) | DONE | full pipeline, see below | get_my_profile via OIDC userinfo (strict allowlist, timeout, 401 mapping) + scope truth model tool + ADR-013/014; **109/109 tests, 13 files**; regression probes on bridge/callback green; audit 0/0; scan clean |
 
 ## M1 verification evidence (2026-11-26, observed output)
 
@@ -44,5 +45,16 @@
 - Security fix found BY tests: logger redaction now covers `state`/`code` keys (was missing; caught by oauth-hygiene canary test).
 - `npm audit` + `--omit=dev` → 0 vulnerabilities; `npm run scan:secrets` → clean; `npm ls --depth=0` → exact pinned versions (no dep changes).
 - Directives honored: no scope expansion; no pinned-dep changes; M3 not started.
+
+## M3 verification evidence (2026-11-26, observed output)
+
+- Baseline before implementation: branch `main`, HEAD `a5fcd78` (parent `4e7f7d2`), clean tree; both commits ancestors of HEAD; suite re-run 75/75 green.
+- `npm run typecheck` → exit 0; `npx eslint .` → exit 0, no findings; `npm run build` → exit 0.
+- `npx vitest run` → "Test Files 13 passed (13) / Tests 109 passed (109)": +34 new M3 tests — userinfo schema (7: object/shape/unexpected-field/wrong-type/localized-variant rejections, minimal-accept), scope truth model (6: unverified/partial/disconnected/expired/foreign-claim), profile security matrix (17: happy path, disconnected-no-provider-call, expired-vs-not-connected distinction, missing scope, cross-tenant, no-args-schema forgery impossible, 401 no-leak, unexpected-field no-echo, non-JSON, timeout <2s, network, token non-leakage, 10-way concurrency, mock foreign-token 401, self-checking mock fixture), HTTP E2E profile flow (5: pre-connect not-connected, connect→consent→callback→profile, scope tool honest state, schema rejects memberId impersonation, disconnect resets both tools).
+- Security fix during M3: profile tool now distinguishes expired (code `expired`, reconnect guidance) from never-connected (`not-connected`) — previously conflated; tool time made injectable for deterministic tests.
+- Regression probes (observed): forged callback state → 400 `unknown state parameter`; 5 MiB body → 413; `/mcpfoo` → 404; POST on GET-only OAuth route → 405. No bridge/callback regressions from M3.
+- `npm audit` (+ `--omit=dev`) → 0 vulnerabilities; pinned deps unchanged.
+- **Post-commit security finding & fix (2026-11-26):** the secret scan was re-run against the COMMITTED tree and FAILED — the M3 test fixture string a foreign-token fixture shaped like a LinkedIn token literal matched the LinkedIn token pattern, and the pre-commit "clean" had been a false negative because the scanner only read `git ls-files` (tracked files), missing not-yet-staged new test files. Fixes: (1) the foreign-token test fixture is now assembled at runtime (no literal pattern hit); (2) `scripts/secret-scan.sh` now scans tracked AND untracked-but-present files (`git ls-files --cached --others --exclude-standard`). Full pipeline re-run green: typecheck 0, lint 0, build 0, 109/109 tests, audit 0/0, **scan clean on the working tree including all new files**. Finding folded into the M3 amend.
+- LIVE LinkedIn validation NOT performed (no credentials — owner action pending, non-blocking).
 
 Update after every task with date, commit, status, test evidence, blockers and next task.

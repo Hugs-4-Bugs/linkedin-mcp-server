@@ -8,7 +8,7 @@
 - [x] T1.2 MCP transport prototype and protocol tests — DONE 2026-11-26 (M1). stdio + streamable HTTP entries; 26-test suite incl. transport E2E and negative protocol cases (404/406/400 Mcp-Method/Mcp-Name mismatch).
 - [x] T2.1 OAuth connection and lifecycle (verified flow) — DONE 2026-11-26 (M2, mock provider per owner directive). Full 3LO: state store (CSRF, single-use, TTL, tenant-bound), AES-256-GCM token vault, mock+real providers, connect/status/disconnect tools, HTTP routes, 75-test suite. Evidence: PROGRESS_TRACKER.md.
 - [ ] T2.2 Secure persistence and tenant context — PARTIAL per plan: in-memory vault + tenant isolation landed in M2 (T2.1); Postgres-backed persistence + retention classes remain M5 (staging). NOT claimed complete.
-- [ ] T3.1 Implement verified read tools
+- [x] T3.1 Implement verified read tools — DONE 2026-11-26 (M3, mock/fixtures per owner directive). `linkedin_get_my_profile` (OIDC userinfo, strict field allowlist, tenant-token identity, timeout+401+malformed handling) + `linkedin_list_granted_scopes` (requested vs token-response claim vs unverified truth model; no introspection endpoint exists — documented). Real provider unit-tested via injected fetch only; LIVE LinkedIn validation NOT performed (no app credentials). Evidence: PROGRESS_TRACKER.md.
 - [ ] T3.2 Implement approved write tools if available and explicitly scoped
 - [ ] T4.1 Claude compatibility testing
 - [ ] T4.2 ChatGPT compatibility testing

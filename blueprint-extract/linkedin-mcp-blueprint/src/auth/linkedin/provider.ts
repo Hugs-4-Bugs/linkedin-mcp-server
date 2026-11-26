@@ -36,6 +36,29 @@ export interface OAuthResult extends TokenSet {
   memberId: string;
 }
 
+/**
+ * OIDC userinfo response (LinkedIn "Sign In with LinkedIn using OpenID
+ * Connect", Microsoft Learn). Only the fields in the fixed self-serve scope
+ * set are permitted here; anything else in the response body is REJECTED,
+ * not silently dropped: profile, email, email_verified, name (derived from
+ * locale variants), given_name, family_name, locale, picture, sub.
+ */
+export interface UserInfoResponse {
+  sub: string;
+  name?: string | undefined;
+  given_name?: string | undefined;
+  family_name?: string | undefined;
+  email?: string | undefined;
+  email_verified?: boolean | undefined;
+  locale?: { language: string; country?: string | undefined } | undefined;
+  picture?: string | undefined;
+}
+
+export interface UserInfoInput {
+  /** Sealed access token for the connected tenant. */
+  accessToken: string;
+}
+
 export interface LinkedInOAuthProvider {
   /** Build the user-facing authorization URL. */
   buildAuthorizeUrl(input: AuthorizeUrlInput): string;
@@ -44,13 +67,21 @@ export interface LinkedInOAuthProvider {
    * code on failure; never logs the code or tokens.
    */
   exchangeCode(input: TokenExchangeInput): Promise<OAuthResult>;
+  /**
+   * Fetch the authenticated member's OIDC userinfo using the tenant's
+   * sealed access token (the caller's identity comes from the token, never
+   * from tool arguments). Throws ProviderError on failure; response bodies
+   * never leak into logs or errors.
+   */
+  getUserInfo(input: UserInfoInput): Promise<UserInfoResponse>;
 }
 
 export type ProviderErrorCode =
   | 'invalid-grant'
   | 'network'
   | 'invalid-response'
-  | 'http-status';
+  | 'http-status'
+  | 'timeout';
 
 export class ProviderError extends Error {
   constructor(

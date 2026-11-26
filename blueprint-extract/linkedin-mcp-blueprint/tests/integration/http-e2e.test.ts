@@ -68,6 +68,8 @@ describe('HTTP transport E2E (loopback)', () => {
       'linkedin_connect',
       'linkedin_status',
       'linkedin_disconnect',
+      'linkedin_get_my_profile',
+      'linkedin_list_granted_scopes',
     ]);
   });
 
