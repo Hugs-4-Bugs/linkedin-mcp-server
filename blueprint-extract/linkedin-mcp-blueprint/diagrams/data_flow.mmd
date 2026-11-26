@@ -1,0 +1,10 @@
+flowchart TD
+ A[Tool Request] --> B[Schema Validation]
+ B --> C[Auth + Tenant Context]
+ C --> D[Scope + Policy + Quota]
+ D --> E[Use Case]
+ E --> F[LinkedIn Adapter]
+ F --> G[Official API]
+ G --> H[Normalize + Minimize]
+ H --> I[Response]
+ H --> J[Audit/Usage: sanitized]

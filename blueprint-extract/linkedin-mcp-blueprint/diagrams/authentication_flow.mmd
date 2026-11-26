@@ -1,0 +1,11 @@
+sequenceDiagram
+ participant U as User
+ participant H as MCP Host
+ participant S as MCP Server
+ participant L as LinkedIn OAuth/API
+ U->>H: Invoke tool / authorize
+ H->>S: MCP request (authenticated as applicable)
+ S->>S: Validate request and tenant
+ S->>L: Delegated API call with protected token
+ L-->>S: Authorized response
+ S-->>H: Validated, minimized tool result

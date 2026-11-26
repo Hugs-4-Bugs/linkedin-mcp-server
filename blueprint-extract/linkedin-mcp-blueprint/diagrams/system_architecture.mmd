@@ -1,0 +1,11 @@
+flowchart TD
+ Client[Claude / ChatGPT] --> Transport[MCP Transport]
+ Transport --> Auth[Host Identity / Auth]
+ Auth --> Policy[Tool Policy / Permission / Quota]
+ Policy --> UseCase[Application Use Cases]
+ UseCase --> Adapter[LinkedIn API Adapter]
+ Adapter --> LI[Official LinkedIn APIs]
+ UseCase --> DB[(PostgreSQL)]
+ Policy --> Usage[Usage / Entitlements]
+ Usage --> DB
+ App[Observability] -.-> UseCase

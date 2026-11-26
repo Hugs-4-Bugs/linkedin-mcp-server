@@ -1,0 +1,10 @@
+flowchart TD
+ A[Read Memory and Rules] --> B[Audit Workspace]
+ B --> C[Choose One Task]
+ C --> D[Plan + Acceptance Criteria]
+ D --> E[Implement]
+ E --> F[Test and Review]
+ F --> G{Verified?}
+ G -->|No| H[Fix or Block] --> E
+ G -->|Yes| I[Update Memory and Tracker]
+ I --> J[Handoff]

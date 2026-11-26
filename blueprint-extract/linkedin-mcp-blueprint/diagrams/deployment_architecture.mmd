@@ -1,0 +1,8 @@
+flowchart TD
+ Local[Local stdio MCP] --> Dev[Developer Environment]
+ Remote[Remote MCP HTTPS] --> Proxy[Proxy / TLS / Security]
+ Proxy --> App[Stateless Application]
+ App --> DB[(Managed PostgreSQL)]
+ App --> Secrets[Secret Manager]
+ App --> Telemetry[Metrics / Logs / Traces]
+ App --> LI[LinkedIn API]
