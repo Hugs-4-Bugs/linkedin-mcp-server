@@ -1,14 +1,29 @@
 # Current State
 
-**2026-11-26 — Phase 0 (feasibility & architecture audit) COMPLETE. Awaiting owner approval before implementation.**
+**2026-11-26 — MILESTONE 1 (FOUNDATION) COMPLETE & VERIFIED. Next: Milestone 2 (LinkedIn OAuth + token vault).**
 
-- Workspace: greenfield repo (`main` @ 97daf6d, no remote, no code yet). Blueprint extracted to `blueprint-extract/linkedin-mcp-blueprint/` and fully read (89 files).
-- Phase 0 deliverable: `/home/z/my-project/download/PHASE_0_REPORT.md` (capability matrix, MCP compatibility matrix, risk register R1–R13, ADRs 005–012 proposed, MVP scope, estimates, owner questions Q1–Q5).
-- Key verified facts (evidence URLs + dates in report):
-  - LinkedIn self-serve scopes only: `openid profile email` (Sign In w/ OIDC) and `w_member_social` (Share on LinkedIn, 150 req/member/day, 100k req/app/day). All org/analytics/messaging/search capabilities are BLOCKED pending LinkedIn application review; programmatic refresh tokens are partner-only; access tokens last 60 days.
-  - Marketing API storage caps confirmed (24h other-member profile cache, 48h member social, 6w/6m org social, 8w org profile, 1y aggregates).
-  - MCP SDK: v1.32.2 (2025-11-25 spec, Node ≥18) vs v2 `@modelcontextprotocol/server` 2.4.0 (2026-07-28 stateless spec, Node ≥20). Recommendation: v2.
-  - Claude remote connectors: public HTTPS port 443 only, OAuth via Claude's published identity / auto-register / own client (redirect `https://claude.ai/api/mcp/auth_callback`); Free plan = 1 connector.
-  - ChatGPT: remote HTTPS MCP only via Plugins; full read+write = Business/Enterprise/Edu, Pro = read-only, Plus/Team unsupported; OAuth providers must issue refresh tokens (`offline_access`).
-  - Graphify = `Graphify-Labs/graphify` (Python, pip name `graphifyy`, local tree-sitter). Decision: ADOPT code-only local mode (ADR-011), not yet installed.
-- Next: owner answers Q1–Q5 (SDK line, hosting/domain, Community Management API pursuit, launch posture, app ownership) and approves → Milestone 1 (foundation).
+## Phase 0 → approval → M1 timeline
+
+- Phase 0 audit complete (report: `/home/z/my-project/download/PHASE_0_REPORT.md`).
+- Owner approved with decisions D-A1…D-A10 (recorded in `memory/DECISIONS.md`).
+- Condition-10 baseline updates done: `08_WORKFLOW/IMPL_PLAN.md` (pinned deps, environments, milestones), ADR-005…012 in `02_ARCHITECTURE/ARCHITECTURE_DECISION_RECORDS.md`, task board updated.
+- **M1 implemented and verified 2026-11-26** (see PROGRESS_TRACKER.md for command evidence).
+
+## M1 facts (verified)
+
+- Repo: `blueprint-extract/linkedin-mcp-blueprint/` (committed at f601063 = blueprint; M1 code staged on `main`, uncommitted pending owner-visible handoff).
+- Runtime: Node v24.22.3, npm 11.19.1; TS 5.9.3 strict (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
+- SDK pinned: `@modelcontextprotocol/server` **2.4.0** + dev `@modelcontextprotocol/client` **2.4.0** (test-only dep), zod 4.6.7 (via `zod/v4` subpath).
+- Working code: `src/` with config validation (zod, fail-fast, local=loopback-only rule), redacting stderr-only logger, tool-policy types, McpServer factory with `status` tool, stdio entry (`serveStdio`), HTTP entry (`createMcpHandler` bridged via node:http, loopback).
+- Transports verified end-to-end: stdio via child process + official client (tools/list + tools/call), HTTP via modern 2026-07-28 envelope (`Mcp-Method`/`Mcp-Name` headers, `_meta` namespaced keys) on loopback.
+- Test suite: 26 tests / 5 files (unit: config, logger redaction, server factory; integration: stdio E2E, HTTP E2E incl. negative cases 404/406/400-mismatch).
+- Quality gates all green: `npm run typecheck`, `lint` (eslint strictTypeChecked + stylisticTypeChecked), `build`, `test` (26/26), `audit` (0 vulnerabilities, all deps), `scan:secrets` (clean).
+- Script inventory: `verify` runs typecheck→lint→build→test→audit; `scan:secrets` separate.
+
+## Known gaps (by design, M2+)
+
+- No LinkedIn OAuth yet (M2: 3LO flow, encrypted token vault, expiry/reconnect status, lifecycle tests).
+- No persistence yet (M2: Postgres + retention classes).
+- HTTP entry is loopback-only; TLS/443 + MCP-side OAuth for Claude connector = M5 staging.
+- Graphify not installed yet (nothing to graph; ADR-011 says install post-baseline).
+- `scripts/` also holds `secret-scan.sh` (quality gate, not a runtime artifact).

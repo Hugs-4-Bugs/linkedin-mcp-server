@@ -3,9 +3,9 @@
 - [x] T0.1 Verify repo baseline and environment (Phase 0) — DONE 2026-11-26. Greenfield repo, no remote, no code; Node v24.22.3 / npm 11.19.1 available. Evidence in PHASE_0_REPORT.md §1.
 - [x] T0.2 Research LinkedIn APIs, scopes, approvals and restrictions — DONE 2026-11-26. Capability matrix §2 (self-serve vs gated vs unavailable; OAuth/token/retention facts with URLs+dates).
 - [x] T0.3 Verify Claude and ChatGPT connection requirements — DONE 2026-11-26 (docs-level; live client tests deferred to T4.1/T4.2). Compatibility matrix §3.
-- [ ] T0.4 Confirm architecture, hosting and cost proposal with owner — REPORT DELIVERED, awaiting owner decision on Q1–Q5 + Phase 0 approval. BLOCKED (owner action).
-- [ ] T1.1 Set up repository, strict TS, CI and tests
-- [ ] T1.2 MCP transport prototype and protocol tests
+- [x] T0.4 Confirm architecture, hosting and cost proposal with owner — DONE 2026-11-26: owner approved Phase 0 with decisions D-A1…D-A10 (recorded in memory/DECISIONS.md). Baseline updates completed per condition 10: 08_WORKFLOW/IMPL_PLAN.md (pinned deps, environments, milestones) + ADR-005…012. Hosting/cost recommendation doc due at M5 (D-A4); Community Management API deferred (D-A5).
+- [x] T1.1 Set up repository, strict TS, CI and tests — DONE 2026-11-26 (M1). Evidence: typecheck/lint/build/26 tests/audit-0-vulns/secret-scan-clean; see PROGRESS_TRACKER.md. CI config itself deferred until repo hosting/remote is decided (owner Q2/D-A4); local `npm run verify` is the gate meanwhile.
+- [x] T1.2 MCP transport prototype and protocol tests — DONE 2026-11-26 (M1). stdio + streamable HTTP entries; 26-test suite incl. transport E2E and negative protocol cases (404/406/400 Mcp-Method/Mcp-Name mismatch).
 - [ ] T2.1 OAuth connection and lifecycle (verified flow)
 - [ ] T2.2 Secure persistence and tenant context
 - [ ] T3.1 Implement verified read tools

@@ -1,8 +1,9 @@
 # Next Actions
 
-1. **OWNER: Review + approve the Phase 0 report** (`/home/z/my-project/download/PHASE_0_REPORT.md`) — answers to Q1–Q5 (SDK line, hosting/domain, Community Management API pursuit, launch posture, LinkedIn app ownership).
-2. **OWNER: Create the LinkedIn developer app** — enable *Sign In with LinkedIn using OpenID Connect* + *Share on LinkedIn* (both self-serve), configure HTTPS redirect URIs (needs hosting decision), transfer Client ID/Secret via secret manager.
-3. Agent (after approval): Milestone 1 — repo foundation (strict TS, pinned deps, CI, config validation, redacting logger, stdio + streamable-http transport skeleton, test scaffolding). No LinkedIn features until the app exists.
-4. Agent: Milestone 2 — LinkedIn 3LO for `openid profile email w_member_social`, encrypted token vault, expiry/reconnect status, mocked-integration tests.
-5. Agent: install Graphify (code-only local mode, ADR-011) once there is a codebase to graph; regenerate at milestones.
-6. Defer: Community Management API application (if owner elects Q3), remote staging deploy, live Claude/ChatGPT validation, security review, monetization/legal review.
+1. **OWNER (blocking M2): Create the LinkedIn developer app** — enable *Sign In with LinkedIn using OpenID Connect* + *Share on LinkedIn* (both self-serve), configure HTTPS redirect URIs (needs hosting decision Q2/D-A4), transfer Client ID/Secret via secret manager. Until then M2 proceeds with mocked OAuth only.
+2. Agent: Milestone 2 — LinkedIn 3LO for `openid profile email w_member_social`: authorize/token endpoints, state+CSRF, encrypted token vault (envelope encryption ADR-008), 60-day expiry status + reconnect UX, lifecycle/disconnect tests (mocked until real app credentials exist).
+3. Agent: Milestone 3 — `get_my_profile` (OIDC userinfo) + granted-scope introspection tools (mocked fixtures until real app).
+4. Agent: Milestone 4 — `draft_post`/`publish_post` (dry-run default, confirmation gate, share rate budget 150/member/day).
+5. Agent: install Graphify code-only (ADR-011) now that a codebase exists; regenerate per milestone; advisory only.
+6. Agent: CI workflow definition once repo hosting/remote is decided (owner D-A4); local `npm run verify` is the interim gate.
+7. Defer (owner-gated): staging deploy + hosting/cost recommendation (M5), live Claude/ChatGPT validation (M6), security review (M7), Community Management API application, monetization/legal review.

@@ -8,6 +8,19 @@
 - Claude + ChatGPT compatibility as separate validation tasks.
 - Monetization-ready boundaries later; not MVP commitment.
 
+## Owner approval decisions (2026-11-26, quoted from approval message — binding)
+
+- D-A1: MVP = self-serve compliant only (OAuth connection, profile retrieval, post drafting, dry-run + confirmed publishing, disconnect + deletion). No search/invitations/messaging/org-management/analytics without independent verification + approval.
+- D-A2: MCP TS SDK v2 preferred; pin exact version; verify Claude/ChatGPT/OAuth/Streamable HTTP/stdio compatibility; documented blockers before any change.
+- D-A3: local + staging + production environments designed; NO public production deployment yet.
+- D-A4: cost-aware hosting recommendation + staging-domain setup guide required; no provider assumed without justification.
+- D-A5: Community Management API application deferred until MVP feasibility/commercial value established.
+- D-A6: private pilot posture; architect for multi-tenant SaaS; no public onboarding or monetization yet.
+- D-A7: commercial/legal verification before public launch or paid monetization (API agreements, storage/retention rules, lifetime-user limits, privacy, approved capabilities).
+- D-A8: security requirements (state validation, secure token storage, tenant isolation, least privilege, tool authorization, audit logging, rate limiting, retention enforcement, disconnect + deletion).
+- D-A9: Graphify in local code-analysis mode if verified compatible; advisory only.
+- D-A10: implementation only after revised architecture, dependency versions, capability matrix, security design, deployment plan and milestone tasks updated → done in `08_WORKFLOW/IMPL_PLAN.md` + ADR-005…012 (2026-11-26).
+
 ## Phase 0 decisions (2026-11-26)
 
 - D-001: Uploaded `LINKEDIN_MCP_MASTER_BUILD_PROMPT.md` (task-level) supersedes the zip's shorter `MASTER_BUILD_PROMPT.md` where they differ; conflict recorded, not silently resolved.

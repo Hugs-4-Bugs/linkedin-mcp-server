@@ -2,7 +2,15 @@
 
 Project: LinkedIn MCP server for Claude and ChatGPT. Scope goal: full feature ambitions but only official API capabilities actually authorized. Personal and organization contexts. Local and hosted deployment. TypeScript/Node selected for MCP ecosystem. Monetization considered later, illustrative ₹99/month; no pricing commitment.
 
-Status: **Phase 0 audit complete 2026-11-26; implementation not started; awaiting owner approval.**
+Status: **Milestone 1 (foundation) complete & verified 2026-11-26; M2 (LinkedIn OAuth) next. Owner approval D-A1…D-A10 in effect.**
+
+## M1 engineering facts (2026-11-26, verified by running code)
+
+- **SDK v2 API shape (pinned `@modelcontextprotocol/server` 2.4.0):** `new McpServer({name,version,title,description})`; `registerTool(name, {title,description,inputSchema,annotations…}, handler)` with zod `z.object()` via `zod/v4` subpath; handler returns `{content:[{type:'text',…}], structuredContent}`. Client: `callTool({name, arguments})` (params-object form). Errors: schema violation → `-32602` + `isError` content; unknown tool → `-32602`.
+- **Modern HTTP envelope (2026-07-28):** POST needs headers `Mcp-Protocol-Version: 2026-07-28`, `Mcp-Method: <method>`, `Mcp-Name: <tool>` (for tools/call) AND body `params._meta` keys `io.modelcontextprotocol/protocolVersion`, `io.modelcontextprotocol/clientCapabilities`, `io.modelcontextprotocol/clientInfo`; otherwise 400 with detailed mismatch data. Accept must include both `application/json` and `text/event-stream` for legacy-era requests (else 406).
+- **stdio:** `serveStdio(factory)` from `@modelcontextprotocol/server/stdio`; `createMcpHandler` from main entry is the web-standard `fetch` handler for Streamable HTTP; bridged to node:http in `http-entry.ts` (loopback-only in local env, config-enforced).
+- **Toolchain gotchas (recorded to avoid repeats):** tests need their own `tests/tsconfig.json` (closest-tsconfig wins for projectService; root tsconfig excludes tests); `@eslint/js` pinned to 10.0.1 (10.15.0 does not exist on the registry); `jiti` required for TS eslint config; tseslint `config()` deprecated → `defineConfig` + `globalIgnores` from `eslint/config`.
+- **Env discipline:** all env parsed once in `src/config/config.ts` (zod); local must bind loopback (enforced); `.env.example` placeholders only; secret-scan script covers tracked files + env files.
 
 Durable facts established in Phase 0 (full evidence in `/home/z/my-project/download/PHASE_0_REPORT.md`):
 
