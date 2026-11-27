@@ -35,6 +35,11 @@ export default defineConfig(
     rules: {
       '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
+      // jsdom-driven UI contract tests drive the page's own script scope
+      // (window.eval); DOM types resolve only under the DOM lib, which the
+      // server tsconfig deliberately excludes. The flagged calls are
+      // fixture code driving the REAL shipped page script.
+      '@typescript-eslint/no-unsafe-call': 'off',
     },
   },
 );
