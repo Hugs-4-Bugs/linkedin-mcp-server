@@ -1,6 +1,6 @@
 # Current State
 
-**2026-11-27 — MILESTONE 8 (release engineering: AGPL licensing, governance docs, release checklist, CI; issue #15) COMPLETE & VERIFIED on branch `develop` (3 commits da8c0fd..cad8a09; pushed to origin/develop; main untouched). Next: Milestone 9 (hosted SaaS/billing) — NOT started, REQUIRES EXPLICIT OWNER APPROVAL per roadmap record.**
+**2026-11-27 — MILESTONE 9 (hosted billing: payment verification + webhook security #13, hosted entitlement enforcement #14) COMPLETE & VERIFIED on local branch `develop` (5 commits 73dc145..d0ef295; NOT pushed — no PAT in this session's env; origin/develop still 6aabdac; main untouched). Next: Milestone 10 (scale & operations) — NOT started, owner-gated.**
 
 ## Phase 0 → approval → M1 → gate → M2 timeline
 
@@ -54,6 +54,14 @@
 - **Client compatibility**: client-compat-claude 11/11, client-compat-chatgpt 10/10 — deterministic protocol-level suites (initialize/session/tools/call/auth/errors/reconnect; confirm-gate enforced via protocol). Shared wire contract recorded in MCP_CLIENT_COMPATIBILITY.md. LIVE connector tests NOT performed (owner-side checklists in CLAUDE_/CHATGPT_INTEGRATION.md).
 - **GitHub limitation (verified)**: PAT = Contents:write only — milestones/issues/PRs API writes 403. Intended reconciliation recorded machine-applyable in roadmap/ROADMAP_RECONCILIATION_M6.md (10 milestones mapped to 7 execution milestones; no deletes/closes/reassigns). M6 delivered as direct commits on develop; owner opens/merges PRs.
 - **Suite 248/248 (21 files)**: +15 PG, +11 Claude, +10 ChatGPT, + config additions; lint 0 · audit 0/0 · scan clean.
+
+## M9 (2026-11-27) — hosted billing (issues #13/#14, branch develop, NOT pushed)
+
+- **#13 payment verification + webhook security**: Razorpay test-mode-only (ADR-024: Stripe India = Preview only, verified; HMAC-SHA256 over RAW body, timing-safe; x-razorpay-event-id dedupe; 10 subscription.* codes). Billing core in `src/billing/` (providerEvents, subscriptionStateMachine w/ 7d past-due grace + immediate cancel revocation + terminal guards, billingStore SQL+memory w/ tx-atomic applyEvent + FOR UPDATE take). Migration 2: webhook_events (unique event_id)/subscriptions/entitlements/usage_counters. `/webhooks/razorpay` HTTP route: raw-body-before-parse capture, size cap, 400-on-failure contract, audit rows w/o payloads.
+- **#14 hosted entitlements**: `BillingEnforcement` gate wired into serverFactory tool dispatch (authenticated ALS tenant only; TTL cache + invalidate(*) on webhook apply; unmapped plans fail closed; atomic quota via FOR UPDATE). **Self-hosting: BILLING_ENABLED default FALSE; disabled = pure-allow gate w/ zero store/table/route/provider access (e2e-proven: route 404, MCP works with no billing env).**
+- **Config fail-closed**: BILLING_ENABLED without DATABASE_URL or RAZORPAY_WEBHOOK_SECRET rejected at startup.
+- **Tests 278 → 330** (52 new: 20 webhook security incl. replay/re-serialization/redaction; 17 entitlement incl. isolation+concurrency; 9 real-PG incl. restart+concurrent-take-capacity; 6 HTTP e2e). Typecheck 0, lint 0, build 0, audit 0/0, scan clean, ZERO dependency changes. 15 files +2,307/−13.
+- **NOT pushed / no PR**: no PAT in this session env (git push = 'could not read Username'); owner steps in HANDOFF_M9 §26. No live Razorpay validation performed or claimed — deterministic fixtures + provider-doc-verified scheme only.
 
 ## M8 (2026-11-27) — release engineering (issue #15, branch develop)
 

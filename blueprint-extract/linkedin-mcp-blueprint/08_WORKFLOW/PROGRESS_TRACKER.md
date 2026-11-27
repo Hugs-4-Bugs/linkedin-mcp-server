@@ -67,6 +67,15 @@
 - `npm audit` (+ `--omit=dev`) → 0 vulnerabilities; `npm run scan:secrets` → clean (tracked + untracked); `npm ls --depth=0` → exact pinned versions unchanged.
 - LIVE publishing NOT performed (no app credentials — owner-gated). `urn:li:person:{sub}` author mapping is community-verified, flagged for live confirmation (ADR-017).
 
+## M9 verification evidence (2026-11-27, observed output)
+
+- Phase 0: sandbox recycled again (checkout on main@M4-era; develop ref survived 6aabdac); npm ci + rebuild; 278/278 re-verified green BEFORE M9 work; scan clean.
+- Phase 1 (GitHub web — API rate-limited this session): #13/#14 open in milestone M9 #6 (exactly 2 issues); bodies/labels verified; owner authorization satisfied via task message; no state/label/milestone changes made.
+- Phase 3 provider research (sources in HANDOFF_M9 §4): razorpay.com docs (webhook validate/test: HMAC-SHA256 raw body, X-Razorpay-Signature, x-razorpay-event-id, order-not-guaranteed; subscriptions webhooks: 10 event codes); stripe.com/global: India = Preview only.
+- Full suite: "Test Files 28 passed (28) / Tests 330 passed (330)" — baseline 278 + 52 new (billing-security 20, entitlement-enforcement 17, pg-billing-integration 9 on embedded PG 19, billing-webhook-e2e 6). Nothing weakened/removed/skipped.
+- `npm run typecheck` 0; `npx eslint .` 0 errors; `npm run build` 0; `npm audit` + `--omit=dev` 0; secret-scan clean; per-commit secret grep 0; diff vs origin/develop: 15 files, +2,307/−13; dependency changes: NONE (lockfile untouched).
+- Commits: 73dc145 (core, Refs #13) → 8121717 (enforcement wiring, Refs #14) → d1dd8d9 (webhook route, Refs #13) → b6d808e (tests, Refs #13/#14) → d0ef295 (architecture doc). NOT pushed: no PAT in session env; git push = "could not read Username for 'https://github.com'"; API 401 on probe. Owner steps in HANDOFF_M9 §26.
+
 ## M8 verification evidence (2026-11-27, observed output)
 
 - Phase 0: sandbox recycled again — checkout was main@M4-era; develop ref survived; restored = 6922cb3 = origin/develop (live remote verified); main 85e6683 untouched; 266/266 re-verified BEFORE M8 work.
