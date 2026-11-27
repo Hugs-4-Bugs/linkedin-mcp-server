@@ -21,6 +21,15 @@ This repository is a planning, specification, and agent-operating package for bu
 ## Important limitation
 LinkedIn API availability, permissions, partner program approval, and allowed use are controlled by LinkedIn. The product must not simulate access to unavailable endpoints or use scraping/session-cookie/bypass techniques.
 
+## Operations (M9/M10)
+
+Hosted SaaS billing (Razorpay TEST mode) and the operational surface are implemented and verified:
+
+- **Billing** (issue #13/#14): HMAC-verified webhook at `POST /webhooks/razorpay` (mounted only when `BILLING_ENABLED=true` + `DATABASE_URL` + secret), entitlement gate on every metered tool call, atomic quota enforcement, console Billing tab served by `GET /api/billing/summary`, `POST /api/billing/checkout`, `POST /api/billing/cancel` (authenticated session + CSRF). Self-hosted (`BILLING_ENABLED=false`, the default) never mounts any of it — see `02_ARCHITECTURE/BILLING_ARCHITECTURE.md`.
+- **Probes & metrics** (issue #17): `GET /healthz` (liveness), `GET /ready` (readiness — real DB probe, 503 when down), `GET /metrics` (Prometheus text, bounded labels, no tenant data). Alert starting points and incident paths: `08_WORKFLOW/OPERATIONS_RUNBOOK.md`.
+- **Console UI**: `GET /admin` — self-contained page (CSP-safe, no build step) speaking MCP itself, with the Billing tab.
+- **Workspace verification**: `node scripts/workspace-stdio-smoke.mjs` and `node scripts/workspace-http-smoke.mjs` run the real compiled server as live processes and exercise the complete billing + ops surface end to end.
+
 ## License and contribution (M8)
 
 This project is licensed under **AGPL-3.0-or-later** — see

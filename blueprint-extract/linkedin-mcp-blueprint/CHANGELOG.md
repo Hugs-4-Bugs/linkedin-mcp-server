@@ -3,6 +3,53 @@
 All notable changes to linkedin-mcp-server. Format: Keep a Changelog;
 versions follow the roadmap until v1.0.0. Dates are UTC.
 
+## [0.10.0] — 2026-11-27 (M9 + M10 — Hosted SaaS, Monetization & Scale/Ops)
+
+### Added — M9 (issues #13/#14, hosted SaaS & monetization)
+- Billing backend: Razorpay TEST-mode provider contract, HMAC-verified
+  webhook route (raw-body capture before parsing, timing-safe compare,
+  event-id dedupe), subscription state machine (active/trial/past-due
+  grace/expired/canceled/revoked), transactional event application,
+  entitlement enforcement gate at tool dispatch (fail-closed), atomic
+  quota take with insert-claim first-materialization fix (Postgres FOR
+  UPDATE + SQLite, no oversubscription under concurrency).
+- Billing REST API (authenticated console surface): GET
+  /api/billing/summary (server-authoritative dashboard payload), POST
+  /api/billing/checkout (test-mode pending state; NEVER writes
+  entitlements — activation is webhook-only), POST /api/billing/cancel
+  (cancel-request; revocation only via verified webhook). Session tenant
+  identity only, CSRF double-submit, audit rows, billing-disabled
+  servers 404 the whole surface.
+- Billing UI: complete Billing tab in the /admin console (dashboard,
+  usage meter, server-catalog plan grid, payment-pending checkout state,
+  two-gate cancellation, self-hosted/session-error/network/exhaustion
+  states, XSS-escaped rendering).
+- Remediation defects: explicit BILLING_ENABLED boolean parser
+  (fail-closed startup validation) and the first-materialization quota
+  race; documented webhook_events retention decision (no destructive
+  pruning — replay protection preserved).
+
+### Added — M10 (issue #17 area, Scale & Operations)
+- In-process metrics registry (zero new dependencies, bounded label
+  space, no tenant labels): HTTP requests/errors by route class,
+  in-flight gauge, MCP tool call outcomes, billing gate decisions,
+  uptime/restart generation.
+- GET /metrics (Prometheus text exposition, unauthenticated, secrets-free)
+  and GET /ready readiness probe (bounded 1s SELECT 1 through the real
+  pool; 503 + reason when the DB is not answering; in-memory always
+  ready). Liveness stays /healthz.
+- Operational runbook (08_WORKFLOW/OPERATIONS_RUNBOOK.md): probe wiring,
+  metric reference, alert starting points, incident quick paths.
+- Workspace smoke scripts (stdio + HTTP) that run the real compiled
+  server as live processes and exercise the full billing + ops surface.
+
+### Tests
+- M9: billing webhook E2E (13), billing API full-stack E2E (13),
+  headless UI contract suite (12, jsdom devDependency), PG billing
+  integration incl. concurrency; M10: ops-metrics-ready suite (14).
+- Full suite 378/378 (31 files), typecheck/lint/build clean, npm audit
+  0/0, secret scan clean.
+
 ## [0.8.0] — 2026-11-27 (M8 — Release Engineering, issue #15)
 
 ### Added
