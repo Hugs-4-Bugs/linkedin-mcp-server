@@ -27,6 +27,14 @@ import { SqlTokenVault } from '../auth/linkedin/sqlTokenVault.js';
 import { SqlOAuthStateStore } from '../auth/linkedin/sqlStateStore.js';
 import { UserAuthStore } from '../auth/users/userAuthStore.js';
 import { currentTenant } from '../identity/requestTenant.js';
+import {
+  BillingEnforcement,
+  EntitlementRequiredError,
+  UsageLimitExceededError,
+  isBillingEnabled,
+  SqlBillingStore,
+  type AnyBillingEnforcement,
+} from '../billing/index.js';
 import { SqlExecutor } from '../storage/sqlExecutor.js';
 import { PostgresExecutor } from '../storage/postgresExecutor.js';
 import { SqliteExecutor } from '../storage/sqliteExecutor.js';
@@ -90,6 +98,14 @@ export interface AppRuntime {
   authStore: import('../auth/users/userAuthStore.js').UserAuthStore | undefined;
   /** M5: SQL publish budget when persistence is active. */
   publishBudgetSql: SqlPublishBudget | undefined;
+  /**
+   * M9 (issues #13/#14): billing enforcement gate. `undefined`/disabled =
+   * self-hosted mode (default): no billing tables, routes or provider calls.
+   * Present only when BILLING_ENABLED + DATABASE_URL + webhook secret.
+   */
+  billing: AnyBillingEnforcement | undefined;
+  /** M9: billing store for the webhook route (same presence rule). */
+  billingStore: SqlBillingStore | undefined;
   /** Close persistent resources (DB pool). No-op in in-memory mode. */
   close(): Promise<void>;
 }
@@ -125,10 +141,47 @@ export function buildRuntime(config: AppConfig): AppRuntime {
     storageBackend: 'in-memory',
     authStore: undefined,
     publishBudgetSql: undefined,
+    billing: undefined,
+    billingStore: undefined,
     async close(): Promise<void> {
       /* in-memory runtime: nothing to close */
     },
   } satisfies AppRuntime;
+}
+
+/** M9: billing wiring shared by persistent runtimes (ADR-023). */
+function buildBilling(
+  config: AppConfig,
+  exec: SqlExecutor,
+): { billing: AnyBillingEnforcement | undefined; billingStore: SqlBillingStore | undefined } {
+  if (!config.BILLING_ENABLED || config.RAZORPAY_WEBHOOK_SECRET === undefined) {
+    // Self-hosted / disabled: no billing objects exist at all.
+    return { billing: undefined, billingStore: undefined };
+  }
+  const billingStore = new SqlBillingStore(exec);
+  let limits: Record<string, number> = {};
+  try {
+    const parsed = JSON.parse(config.BILLING_PLAN_LIMITS) as unknown;
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      limits = Object.fromEntries(
+        Object.entries(parsed as Record<string, unknown>)
+          .filter(([, v]) => typeof v === 'number' && Number.isFinite(v) && v > 0)
+          .map(([k, v]) => [k, v as number]),
+      );
+    }
+  } catch {
+    log.warn('BILLING_PLAN_LIMITS unparsable; no plans configured (fail-closed)');
+    limits = {};
+  }
+  return {
+    billing: new BillingEnforcement({
+      store: billingStore,
+      limits,
+      counter: 'tool-calls',
+      windowMs: 30 * 86_400_000,
+    }),
+    billingStore,
+  };
 }
 
 /**
@@ -182,6 +235,7 @@ export async function buildPersistentRuntime(config: AppConfig): Promise<AppRunt
         budgetWindowMs: 86_400_000,
       } satisfies Partial<RetentionPolicy>)
     : undefined;
+  const { billing, billingStore } = buildBilling(config, exec);
   return {
     config,
     tenant: LOCAL_DEV_TENANT,
@@ -195,6 +249,8 @@ export async function buildPersistentRuntime(config: AppConfig): Promise<AppRunt
     storageBackend: exec.kind,
     authStore,
     publishBudgetSql,
+    billing,
+    billingStore,
     async close(): Promise<void> {
       sweeper?.stop();
       await exec.close();
@@ -297,9 +353,9 @@ function registerConnectionTools(server: McpServer, runtime: AppRuntime): void {
   }> = async (name) => {
     log.info('tool invoked', { tool: name });
     const ctx = toolContext(runtime);
-    if (name === 'linkedin_connect') return auditedRun(name, ctx, () => connectTool(ctx));
-    if (name === 'linkedin_status') return auditedRun(name, ctx, () => statusTool(ctx));
-    if (name === 'linkedin_disconnect') return auditedRun(name, ctx, () => disconnectTool(ctx));
+    if (name === 'linkedin_connect') return auditedRun(name, ctx, () => withBillingGate(runtime, name, () => connectTool(ctx))());
+    if (name === 'linkedin_status') return auditedRun(name, ctx, () => withBillingGate(runtime, name, () => statusTool(ctx))());
+    if (name === 'linkedin_disconnect') return auditedRun(name, ctx, () => withBillingGate(runtime, name, () => disconnectTool(ctx))());
     return { content: [{ type: 'text', text: 'unknown tool' }], isError: true };
   };
   for (const spec of CONNECTION_TOOL_SPECS) {
@@ -332,7 +388,7 @@ function registerProfileTools(server: McpServer, runtime: AppRuntime): void {
     async () => {
       const ctx = toolContext(runtime);
       return auditedRun(PROFILE_TOOL_SPEC.name, ctx, () =>
-        getMyProfileTool(ctx));
+        withBillingGate(runtime, PROFILE_TOOL_SPEC.name, () => getMyProfileTool(ctx))());
     },
   );
   server.registerTool(
@@ -345,7 +401,7 @@ function registerProfileTools(server: McpServer, runtime: AppRuntime): void {
     async () => {
       const ctx = toolContext(runtime);
       return auditedRun(SCOPE_TOOL_SPEC.name, ctx, () =>
-        listGrantedScopesTool(ctx));
+        withBillingGate(runtime, SCOPE_TOOL_SPEC.name, () => listGrantedScopesTool(ctx))());
     },
   );
 }
@@ -372,7 +428,8 @@ function registerPublishTools(server: McpServer, runtime: AppRuntime): void {
     (args: unknown) => {
       const ctx = toolContext(runtime);
       return auditedRun(DRAFT_TOOL_SPEC.name, ctx, () =>
-        Promise.resolve(draftPostTool(ctx, DraftPostInputSchema.parse(args ?? {})) as unknown as Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>));
+        withBillingGate(runtime, DRAFT_TOOL_SPEC.name, () =>
+          Promise.resolve(draftPostTool(ctx, DraftPostInputSchema.parse(args ?? {})) as unknown as Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>))());
     },
   );
   server.registerTool(
@@ -385,7 +442,8 @@ function registerPublishTools(server: McpServer, runtime: AppRuntime): void {
     async (args: unknown) => {
       const ctx = toolContext(runtime);
       return auditedRun(PREVIEW_TOOL_SPEC.name, ctx, () =>
-        previewPostTool(ctx, PreviewPostInputSchema.parse(args ?? {})));
+        withBillingGate(runtime, PREVIEW_TOOL_SPEC.name, () =>
+          previewPostTool(ctx, PreviewPostInputSchema.parse(args ?? {})))());
     },
   );
   server.registerTool(
@@ -398,7 +456,8 @@ function registerPublishTools(server: McpServer, runtime: AppRuntime): void {
     async (args: unknown) => {
       const ctx = toolContext(runtime);
       return auditedRun(PUBLISH_TOOL_SPEC.name, ctx, () =>
-        publishPostTool(ctx, PublishPostInputSchema.parse(args ?? {})));
+        withBillingGate(runtime, PUBLISH_TOOL_SPEC.name, () =>
+          publishPostTool(ctx, PublishPostInputSchema.parse(args ?? {})))());
     },
   );
 }
@@ -416,4 +475,40 @@ export function createMcpServer(runtime: AppRuntime): McpServer {
   registerProfileTools(server, runtime);
   registerPublishTools(server, runtime);
   return server;
+}
+
+/**
+ * M9 issue #14 — hosted entitlement gate at tool dispatch.
+ *
+ * Wrap a tool runner with the billing enforcement: when billing is
+ * ENABLED, every metered tool call passes the server-side entitlement +
+ * usage check (authenticated ALS tenant only — arguments never carry
+ * tenant or status). When billing is DISABLED (self-hosted default), the
+ * wrapper is the identity function: zero billing machinery runs.
+ */
+function withBillingGate(
+  runtime: AppRuntime,
+  tool: string,
+  fn: () => Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>,
+): () => Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
+  const enforcement = runtime.billing;
+  if (enforcement === undefined || !isBillingEnabled(enforcement)) {
+    return fn;
+  }
+  return async () => {
+    const tenant = currentTenant();
+    try {
+      await enforcement.gateToolCall(tenant.tenantId, tool);
+    } catch (err) {
+      if (err instanceof EntitlementRequiredError || err instanceof UsageLimitExceededError) {
+        // Structured billing refusal — never a raw stack to the client.
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: err.name, message: err.message }) }],
+          isError: true,
+        };
+      }
+      throw err;
+    }
+    return fn();
+  };
 }
