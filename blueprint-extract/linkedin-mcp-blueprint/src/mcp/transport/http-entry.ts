@@ -36,6 +36,7 @@ import {
   type WebhookResult,
 } from '../../billing/webhookRoute.js';
 import { isBillingEnabled } from '../../billing/enforcement.js';
+import { handleBillingApiRoutes, isBillingApiRoute } from './billingApi.js';
 
 const log = createLogger('entry:http');
 
@@ -591,6 +592,18 @@ async function main(): Promise<void> {
         // computed over the exact received bytes).
         if (isBillingWebhookRoute(req, runtime)) {
           await handleBillingWebhook(req, res, runtime, config);
+          return;
+        }
+        // M9: authenticated billing REST API for the console UI (mounted
+        // only when billing is enabled; disabled servers 404 via the
+        // fall-through below — self-hosted boundary).
+        if (isBillingApiRoute(req, runtime)) {
+          await handleBillingApiRoutes(req, res, {
+            runtime,
+            config,
+            auth,
+            authStore: runtime.authStore,
+          });
           return;
         }
         if (!isMcpRoute(req.url)) {
