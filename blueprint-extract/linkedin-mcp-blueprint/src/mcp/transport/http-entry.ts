@@ -30,6 +30,12 @@ import { AuthError, type UserAuthStore } from '../../auth/users/userAuthStore.js
 import { runWithTenant } from '../../identity/requestTenant.js';
 import { ADMIN_PAGE_HTML } from './adminPage.js';
 import { TokenBucket } from '../../usage/tokenBucket.js';
+import {
+  processWebhook,
+  webhookStatusFor,
+  type WebhookResult,
+} from '../../billing/webhookRoute.js';
+import { isBillingEnabled } from '../../billing/enforcement.js';
 
 const log = createLogger('entry:http');
 
@@ -45,6 +51,101 @@ function routePath(url: string | undefined): string {
 function isMcpRoute(url: string | undefined): boolean {
   const path = routePath(url);
   return path === '/mcp' || path === '/mcp/';
+}
+
+/** M9 issue #13: the webhook route exists only when billing is enabled. */
+function isBillingWebhookRoute(req: IncomingMessage, runtime: AppRuntime): boolean {
+  if (req.method !== 'POST') {
+    return false;
+  }
+  const path = routePath(req.url);
+  if (path !== '/webhooks/razorpay') {
+    return false;
+  }
+  // Self-hosted / disabled: the route is never mounted — a probe gets 404.
+  const enforcement = runtime.billing;
+  return enforcement !== undefined && isBillingEnabled(enforcement) && runtime.billingStore !== undefined;
+}
+
+/**
+ * M9 issue #13: webhook handler. Raw bytes are accumulated BEFORE any JSON
+ * parse (HMAC must run over the exact received bytes); the signature is
+ * timing-safe-verified, the event id deduped, and the state machine applied
+ * in one transaction by the store. Audit rows via the existing audit_log
+ * (actor 'billing:webhook', action = event code, no payloads).
+ */
+async function handleBillingWebhook(
+  req: IncomingMessage,
+  res: ServerResponse,
+  runtime: AppRuntime,
+  config: AppConfig,
+): Promise<void> {
+  const store = runtime.billingStore;
+  const enforcement = runtime.billing;
+  if (store === undefined || enforcement === undefined || !isBillingEnabled(enforcement)) {
+    jsonError(res, 404, 'not found');
+    return;
+  }
+  const secret = config.RAZORPAY_WEBHOOK_SECRET ?? '';
+  const signature = req.headers['x-razorpay-signature'];
+  const eventId = req.headers['x-razorpay-event-id'];
+  const chunks: Buffer[] = [];
+  let total = 0;
+  let failed = false;
+  req.on('data', (chunk: Buffer) => {
+    total += chunk.length;
+    if (total > maxBodyBytes(config)) {
+      failed = true; // cap BEFORE buffering (same app rule as /mcp)
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
+  req.on('error', () => {
+    failed = true;
+  });
+  await new Promise<void>((resolve) => {
+    req.on('end', resolve);
+  });
+  if (failed as boolean) {
+    jsonError(res, 413, 'payload too large');
+    return;
+  }
+  const raw = Buffer.concat(chunks);
+  const audit = (action: string, detail: string): Promise<void> => {
+    const s = runtime.authStore;
+    if (s === undefined) return Promise.resolve();
+    // Webhook actions are provider-driven (no authenticated tenant); the
+    // store's audit() signature needs a tenant id — use the operator
+    // system scope. Payloads are never included.
+    return s.audit('system:billing', action, detail).catch(() => undefined);
+  };
+  const sigStr = typeof signature === 'string' ? signature : undefined;
+  const evtStr = typeof eventId === 'string' ? eventId : undefined;
+  let result: WebhookResult;
+  try {
+    result = await processWebhook(
+      raw,
+      sigStr,
+      evtStr,
+      { store, secret, maxBodyBytes: maxBodyBytes(config), audit },
+    );
+  } catch (err) {
+    log.error('webhook processing failed', { error: err instanceof Error ? err.message : String(err) });
+    result = 'invalid-payload';
+  }
+  // Cache invalidation so revocations take effect on the next tool call
+  // (bounded by the TTL anyway; this makes it immediate for this process).
+  if (result === 'verified-applied') {
+    enforcement.invalidate('*');
+  }
+  const status = webhookStatusFor(result);
+  if (status === 200) {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ status: result === 'verified-duplicate' ? 'duplicate' : 'received' }));
+    return;
+  }
+  jsonError(res, status, result === 'invalid-signature' ? 'invalid signature' : 'bad request');
 }
 
 /** Parse cookies into a simple map (single header, small values). */
@@ -485,6 +586,13 @@ async function main(): Promise<void> {
         if (await handleAuthAndUiRoutes(req, res, runtime, auth, runtime.authStore)) return;
         if (await handleOAuthRoutes(req, res, runtime, auth)) return;
         if (handleMockAuthorize(req, res, runtime)) return;
+        // M9 issue #13: provider webhook route (mounted ONLY when billing is
+        // enabled; raw-body capture precedes ALL parsing because the HMAC is
+        // computed over the exact received bytes).
+        if (isBillingWebhookRoute(req, runtime)) {
+          await handleBillingWebhook(req, res, runtime, config);
+          return;
+        }
         if (!isMcpRoute(req.url)) {
           jsonError(res, 404, 'not found');
           return;
