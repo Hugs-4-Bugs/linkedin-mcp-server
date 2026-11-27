@@ -169,6 +169,31 @@ describe('persistent publish ledger + budget', () => {
     expect(await budget.take(TEN)).toBe(false);
     expect(await budget.available(TEN)).toBe(0);
   });
+  // M9 remediation defect 2 regression (SQLite side): concurrent
+  // first-time takes on a fresh tenant row. SQLite serializes writers on
+  // one connection, so these take turns — but the assertions are exact
+  // anyway (capacity consumed exactly, never exceeded), proving the
+  // ON CONFLICT DO NOTHING materialization is well-formed SQLite too.
+  it('budget: concurrent FIRST-time takes (fresh tenant, SQLite) consume exactly capacity', async () => {
+    const budget = new SqlPublishBudget(exec, 5, 60_000);
+    const tenant = 'sqlite-fresh-budget-tenant';
+    const results = await Promise.all(
+      Array.from({ length: 14 }, () => budget.take(tenant)),
+    );
+    expect(results.filter((r) => r).length).toBe(5);
+    expect(results.filter((r) => !r).length).toBe(9);
+    expect(await budget.available(tenant)).toBe(0);
+  });
+  it('billing store: concurrent FIRST-time takes (fresh tenant/counter, SQLite) consume exactly capacity', async () => {
+    const { SqlBillingStore } = await import('../../src/billing/billingStore.js');
+    const store = new SqlBillingStore(exec);
+    const results = await Promise.all(
+      Array.from({ length: 14 }, () => store.take('sqlite-fresh-billing', 'tool-calls', 5, 30 * 86_400_000, 1_700_000_000_000)),
+    );
+    expect(results.filter((r) => r).length).toBe(5);
+    const snap = await store.usageOf('sqlite-fresh-billing', 'tool-calls');
+    expect(snap?.used).toBe(5);
+  });
   it('budget survives a "restart" (new executor, same file)', async () => {
     const exec2 = new SqliteExecutor(join(dir, 'test.db'));
     const budget2 = new SqlPublishBudget(exec2, 2, 60_000);

@@ -197,9 +197,25 @@ export class SqlBillingStore implements BillingStore {
 
   async take(tenantId: string, counter: string, capacity: number, windowMs: number, now: number): Promise<boolean> {
     return this.exec.with(async (tx) => {
-      // Same proven pattern as SqlPublishBudget.take (M5): read-modify-write
-      // under FOR UPDATE (Postgres) so concurrent take() can never exceed
-      // capacity. SQLite serializes writers on one connection.
+      // First-materialization fix (M9 verification defect 2): SELECT … FOR
+      // UPDATE cannot lock a row that does not exist yet, so the first N
+      // concurrent takes for a fresh (tenant, counter) each saw "no row",
+      // each wrote a singleton hits list, and each returned true —
+      // exceeding capacity (reproduced 18/20 rounds on real PG). Fix:
+      // materialize the row INSIDE the transaction before the locked
+      // read. ON CONFLICT DO NOTHING claims it exactly once; the
+      // transactions that lose the insert race still find an existing
+      // row and serialize on its lock. SQLite is covered by the same
+      // statement (single-writer connection, ON CONFLICT supported).
+      await tx.execute({
+        sql: `INSERT INTO usage_counters (tenant_id, counter, window_ms, hits)
+              VALUES ($1, $2, $3, '[]')
+              ON CONFLICT (tenant_id, counter) DO NOTHING`,
+        params: [tenantId, counter, windowMs],
+      });
+      // Read-modify-write under FOR UPDATE (Postgres): with the row now
+      // guaranteed to exist, the lock fully serializes concurrent takes.
+      // SQLite serializes writers on one connection.
       const selectSql = this.exec.kind === 'postgres'
         ? `SELECT hits FROM usage_counters WHERE tenant_id = $1 AND counter = $2 FOR UPDATE`
         : `SELECT hits FROM usage_counters WHERE tenant_id = $1 AND counter = $2`;

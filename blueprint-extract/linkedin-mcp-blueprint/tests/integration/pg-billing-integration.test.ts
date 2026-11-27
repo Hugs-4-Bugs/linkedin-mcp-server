@@ -127,6 +127,29 @@ describe('usage counters (real PG): atomic consumption', () => {
     expect(snap?.used).toBe(CAP);
   });
 
+  // M9 remediation defect 2 regression: the FIRST-materialization race.
+  // Every tenant below starts with NO usage_counters row; concurrent
+  // first-time takes are exactly the scenario that over-consumed before
+  // the fix (FOR UPDATE cannot lock a nonexistent row). Repeated over
+  // multiple fresh tenants in the same run: assertions are exact —
+  // allowed == capacity, persisted hits == capacity — never loosened.
+  it('concurrent FIRST-time take() (fresh tenant/counter row) never exceeds capacity', async () => {
+    const ROUNDS = 12; // fresh tenant/counter initialization each round
+    for (let round = 1; round <= ROUNDS; round++) {
+      const store = new SqlBillingStore(exec);
+      const tenant = `tenant-fresh-${String(round)}`;
+      const counter = `counter-${String(round)}`; // fresh counter too
+      const CAP = 5;
+      const results = await Promise.all(
+        Array.from({ length: 14 }, () => store.take(tenant, counter, CAP, 30 * 86_400_000, NOW)),
+      );
+      const allowed = results.filter((r) => r).length;
+      expect(allowed, `round ${String(round)}: allowed must equal capacity exactly`).toBe(CAP);
+      const snap = await store.usageOf(tenant, counter);
+      expect(snap?.used, `round ${String(round)}: persisted hits must equal capacity`).toBe(CAP);
+    }
+  });
+
   it('enforcement gate on real PG: reject without entitlement, allow with one', async () => {
     const store = new SqlBillingStore(exec);
     const enforcement = new BillingEnforcement({

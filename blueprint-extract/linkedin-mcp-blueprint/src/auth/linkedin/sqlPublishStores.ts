@@ -139,6 +139,21 @@ export class SqlPublishBudget {
 
   async take(tenantId: string): Promise<boolean> {
     return this.exec.with(async (tx) => {
+      // First-materialization fix (M9 verification defect 2, shared with
+      // SqlBillingStore.take): FOR UPDATE cannot lock a nonexistent row, so
+      // the first N concurrent takes for a fresh tenant each saw "no row",
+      // each wrote a singleton list, and each returned true — exceeding
+      // capacity (reproduced on the M8 baseline commit too: this half of
+      // the defect predates M9). Materialize the row INSIDE the transaction
+      // before the locked read: ON CONFLICT DO NOTHING claims it exactly
+      // once; insert-race losers still find an existing row and serialize
+      // on its lock. SQLite is covered by the same statement.
+      await tx.execute({
+        sql: `INSERT INTO publish_budgets (tenant_id, window_ms, capacity, hits)
+              VALUES ($1, $2, $3, '[]')
+              ON CONFLICT (tenant_id) DO NOTHING`,
+        params: [tenantId, this.windowMs, this.capacity],
+      });
       // Row-level lock: on Postgres, SELECT ... FOR UPDATE makes the
       // read-modify-write atomic under concurrent transactions (each
       // with() runs on its own pooled client). SQLite serializes writers

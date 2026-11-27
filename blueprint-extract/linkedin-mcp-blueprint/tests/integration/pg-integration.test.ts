@@ -209,6 +209,23 @@ describe('SQL publish ledger + budget on PostgreSQL', () => {
     expect(results.filter((r) => r).length).toBe(3);
     expect(results.filter((r) => !r).length).toBe(2);
   });
+  // M9 remediation defect 2 regression (shared SqlPublishBudget race):
+  // fresh-tenant first-materialization — the exact scenario that
+  // over-consumed before the fix (14 concurrent takes, 0 pre-existing row).
+  // Exact assertions, repeated across fresh tenants; no retries, no slack.
+  it('concurrent FIRST-time take() (fresh tenant) never exceeds capacity', async () => {
+    for (let round = 1; round <= 10; round++) {
+      const budget = new SqlPublishBudget(exec, 5, 60_000);
+      const tenant = `pb-fresh-${String(round)}`;
+      const results = await Promise.all(
+        Array.from({ length: 14 }, () => budget.take(tenant)),
+      );
+      const allowed = results.filter((r) => r).length;
+      expect(allowed, `round ${String(round)}: must equal capacity exactly`).toBe(5);
+      expect(results.filter((r) => !r).length).toBe(9);
+      expect(await budget.available(tenant)).toBe(0);
+    }
+  });
 });
 
 describe('user auth store on PostgreSQL', () => {
