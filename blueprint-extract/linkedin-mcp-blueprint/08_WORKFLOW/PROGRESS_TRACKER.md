@@ -67,6 +67,15 @@
 - `npm audit` (+ `--omit=dev`) → 0 vulnerabilities; `npm run scan:secrets` → clean (tracked + untracked); `npm ls --depth=0` → exact pinned versions unchanged.
 - LIVE publishing NOT performed (no app credentials — owner-gated). `urn:li:person:{sub}` author mapping is community-verified, flagged for live confirmation (ADR-017).
 
+## M8 verification evidence (2026-11-27, observed output)
+
+- Phase 0: sandbox recycled again — checkout was main@M4-era; develop ref survived; restored = 6922cb3 = origin/develop (live remote verified); main 85e6683 untouched; 266/266 re-verified BEFORE M8 work.
+- Phase 1 ROADMAP CORRECTION (live API): issues #13/#14 → milestone M9 Hosted SaaS & Monetization (M9 = "Future… Explicitly out of M1-M8 execution scope" per roadmap/ROADMAP_RECONCILIATION_M6.md); actual M8 milestone #2 = issue #15 "AGPL open-source release checklist" (labels type: documentation/priority: high/area: devops). No comments/assignees. Implemented #15 only; billing deferred with evidence (HANDOFF_M8 §0/§13).
+- `npx vitest run` on committed HEAD cad8a09 → "Test Files 24 passed (24) / Tests 278 passed (278)": baseline 266 + 12 release-checklist tests. One expectation updated for intentional version bump (0.1.0→0.8.0), nothing weakened/removed/skipped.
+- `npm run typecheck` → 0; `npx eslint .` → 0 errors; `npm run build` → 0; `npm audit` + `--omit=dev` → 0; secret scan → clean; per-commit secret grep → clean; dep census: 220 locked entries, all AGPL-compatible (MIT 172/Apache 18/MPL-2.0 12/ISC 8/BSD2 6/BlueOak 2/BSD3 2), enforced by census test.
+- Commits (develop): da8c0fd (licensing+metadata) → 93d1593 (governance+CI) → cad8a09 (12 tests); each verified SHA/parent/tree/files/no-secrets; pushed 6922cb3..cad8a09(+docs commit) to origin/develop; main untouched before/during/after.
+- PR creation attempted live: 403 (Contents:write-only PAT) — same as M6/M7; owner steps in HANDOFF_M8 §12. Refs #15 only; nothing closed/assigned/merged.
+
 ## M7 verification evidence (2026-11-27, observed output)
 
 - Phase 0: sandbox recycled again — checkout was main@M4-era; develop ref survived; restored = e287a7a = origin/develop (live remote verified); main 85e6683 untouched; 248/248 re-verified BEFORE any M7 work.

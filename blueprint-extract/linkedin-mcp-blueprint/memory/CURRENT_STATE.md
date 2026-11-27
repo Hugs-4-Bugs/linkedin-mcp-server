@@ -1,6 +1,6 @@
 # Current State
 
-**2026-11-27 — MILESTONE 7 (security hardening: threat model, retention enforcement, deletion verification, audit coverage; issues #12/#16) COMPLETE & VERIFIED on branch `develop` (4 commits e842f78..612e7ff; pushed to origin/develop; main untouched). Next: Milestone 8 (release engineering) — NOT started, awaiting owner.**
+**2026-11-27 — MILESTONE 8 (release engineering: AGPL licensing, governance docs, release checklist, CI; issue #15) COMPLETE & VERIFIED on branch `develop` (3 commits da8c0fd..cad8a09; pushed to origin/develop; main untouched). Next: Milestone 9 (hosted SaaS/billing) — NOT started, REQUIRES EXPLICIT OWNER APPROVAL per roadmap record.**
 
 ## Phase 0 → approval → M1 → gate → M2 timeline
 
@@ -54,6 +54,15 @@
 - **Client compatibility**: client-compat-claude 11/11, client-compat-chatgpt 10/10 — deterministic protocol-level suites (initialize/session/tools/call/auth/errors/reconnect; confirm-gate enforced via protocol). Shared wire contract recorded in MCP_CLIENT_COMPATIBILITY.md. LIVE connector tests NOT performed (owner-side checklists in CLAUDE_/CHATGPT_INTEGRATION.md).
 - **GitHub limitation (verified)**: PAT = Contents:write only — milestones/issues/PRs API writes 403. Intended reconciliation recorded machine-applyable in roadmap/ROADMAP_RECONCILIATION_M6.md (10 milestones mapped to 7 execution milestones; no deletes/closes/reassigns). M6 delivered as direct commits on develop; owner opens/merges PRs.
 - **Suite 248/248 (21 files)**: +15 PG, +11 Claude, +10 ChatGPT, + config additions; lint 0 · audit 0/0 · scan clean.
+
+## M8 (2026-11-27) — release engineering (issue #15, branch develop)
+
+- **SCOPE CORRECTION (verified live)**: prompt claimed M8 = issues #13/#14 (billing); actual GitHub roadmap: #13/#14 are milestone **M9 Hosted SaaS & Monetization** ("Future", "Explicitly out of M1-M8 execution scope" per ROADMAP_RECONCILIATION_M6.md). Actual M8 = **issue #15 AGPL release checklist**. Billing NOT started (Stop-at-M8 + no-silent-roadmap-change rules).
+- **#15 implemented**: LICENSE (canonical AGPL-3.0, 34,020 chars), NOTICE, package.json license=AGPL-3.0-or-later + version 0.8.0 (private kept until owner publish), CONTRIBUTING (gates+DCO), CODE_OF_CONDUCT (Covenant 2.1), SECURITY_POLICY rewritten (private channel, 72h/7d SLA), CHANGELOG 0.1.0→0.8.0, RELEASE_CHECKLIST (signed tags, §13 source-offer), .github/workflows/ci.yml (same gates as humans run), README license section, server version sync.
+- **Enforcement**: tests/security/release-checklist.test.ts — 12 tests (canonical AGPL markers, dep license census gate — 220 locked entries all AGPL-compatible, governance non-stub checks, version sync).
+- **Tests**: 266 → **278/278**; lint 0; typecheck 0; build 0; audit 0/0; scan clean; ZERO dependency changes (metadata only).
+- **PR blocked again** (403, Contents:write-only PAT) — owner steps in HANDOFF_M8 §12.
+- **M9 preconditions recorded**: #13/#14 need explicit owner approval; self-hosting must never require hosted payment (issue #14 constraint, also D-A6).
 
 ## M7 (2026-11-27) — security hardening (issues #12/#16, branch develop)
 
