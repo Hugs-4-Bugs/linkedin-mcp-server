@@ -37,6 +37,7 @@ import {
 } from '../../billing/webhookRoute.js';
 import { isBillingEnabled } from '../../billing/enforcement.js';
 import { handleBillingApiRoutes, isBillingApiRoute } from './billingApi.js';
+import { metrics, MetricsRegistry } from '../../observability/metrics.js';
 
 const log = createLogger('entry:http');
 
@@ -179,6 +180,34 @@ function secureHeaders(res: ServerResponse): void {
 function jsonError(res: ServerResponse, status: number, code: string): void {
   res.writeHead(status, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ error: code }));
+}
+
+/**
+ * M10 issue #17 (Operational health): readiness check behind /ready.
+ * In-memory mode has no external dependency — always ready. Persistent
+ * mode answers a bounded 1s SELECT 1 through the ACTUAL executor the
+ * tools use (no second pool, no divergent path). A DB that cannot answer
+ * one trivial query within 1s must pull the replica from rotation.
+ */
+async function isRuntimeReady(runtime: AppRuntime): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (runtime.storageBackend === 'in-memory') {
+    return { ok: true };
+  }
+  const exec = runtime.readinessExecutor;
+  if (exec === undefined) {
+    // No executor exposed: fail-open only for in-memory (covered above);
+    // a persistent backend without an executor is a build inconsistency.
+    return { ok: false, reason: 'persistence configured but no executor' };
+  }
+  try {
+    await Promise.race([
+      exec.query({ sql: 'SELECT 1 AS one' }),
+      new Promise<never>((_, reject) => { setTimeout(() => { reject(new Error('readiness probe timeout (1s)')); }, 1000).unref(); }),
+    ]);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 interface AuthParts {
@@ -381,7 +410,7 @@ async function handleAuthAndUiRoutes(
   const path = routePath(req.url);
   const isUi = path === '/admin' || path === '/admin/';
   const isAuthRoute = path.startsWith('/auth/');
-  if (!isUi && !isAuthRoute && path !== '/healthz') return false;
+  if (!isUi && !isAuthRoute && path !== '/healthz' && path !== '/metrics' && path !== '/ready') return false;
 
   if (path === '/healthz') {
     if (req.method !== 'GET') {
@@ -390,6 +419,47 @@ async function handleAuthAndUiRoutes(
     }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, backend: runtime.storageBackend, env: runtime.config.ENVIRONMENT }));
+    return true;
+  }
+
+  // M10 issue #17 (Observability): Prometheus text exposition. Liveness
+  // probe semantics (not readiness): unauthenticated by design so a
+  // scrape works before login; exposes ONLY this process's own counters
+  // — no tenant data, no secrets, no payloads, bounded label space.
+  if (path === '/metrics') {
+    if (req.method !== 'GET') {
+      jsonError(res, 405, 'method not allowed');
+      return true;
+    }
+    res.writeHead(200, { 'content-type': 'text/plain; version=0.0.4; charset=utf-8' });
+    res.end(metrics.render());
+    return true;
+  }
+
+  // M10 issue #17 (Operational health): readiness probe. Liveness says
+  // "the process exists"; readiness says "it can serve traffic" — for
+  // this deployment that means the persistence layer answers. In-memory
+  // mode is always ready (no DB dependency to check).
+  if (path === '/ready') {
+    if (req.method !== 'GET') {
+      jsonError(res, 405, 'method not allowed');
+      return true;
+    }
+    const started = Date.now();
+    const ready = await isRuntimeReady(runtime);
+    const body = {
+      ok: ready.ok,
+      backend: runtime.storageBackend,
+      checkedMs: Date.now() - started,
+    };
+    if (!ready.ok) {
+      // 503: load balancers must pull this replica out of rotation.
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ...body, reason: ready.reason }));
+      return true;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
     return true;
   }
 
@@ -574,6 +644,14 @@ async function main(): Promise<void> {
 
   const server = createServer((req, res) => {
     secureHeaders(res);
+    const routeClass = MetricsRegistry.routeClassOf(routePath(req.url));
+    metrics.httpStart();
+    // Response/finish hook: record status + in-flight decrement exactly
+    // once (close fires for aborted connections too).
+    res.on('close', () => {
+      if (res.writableEnded) metrics.httpEnd(routeClass, res.statusCode);
+      else metrics.httpAborted();
+    });
     const ip = req.socket.remoteAddress ?? 'unknown';
     if (!rateLimit(ip)) {
       jsonError(res, 429, 'rate limit exceeded');

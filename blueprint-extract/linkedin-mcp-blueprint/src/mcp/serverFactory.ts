@@ -27,6 +27,7 @@ import { SqlTokenVault } from '../auth/linkedin/sqlTokenVault.js';
 import { SqlOAuthStateStore } from '../auth/linkedin/sqlStateStore.js';
 import { UserAuthStore } from '../auth/users/userAuthStore.js';
 import { currentTenant } from '../identity/requestTenant.js';
+import { metrics } from '../observability/metrics.js';
 import {
   BillingEnforcement,
   EntitlementRequiredError,
@@ -106,6 +107,12 @@ export interface AppRuntime {
   billing: AnyBillingEnforcement | undefined;
   /** M9: billing store for the webhook route (same presence rule). */
   billingStore: SqlBillingStore | undefined;
+  /**
+   * M10 issue #17 (Operational health): the persistence executor for the
+   * /ready probe (bounded SELECT 1 through the REAL pool the tools use).
+   * Undefined in in-memory mode (always ready).
+   */
+  readinessExecutor: import('../storage/sqlExecutor.js').SqlExecutor | undefined;
   /** Close persistent resources (DB pool). No-op in in-memory mode. */
   close(): Promise<void>;
 }
@@ -143,6 +150,7 @@ export function buildRuntime(config: AppConfig): AppRuntime {
     publishBudgetSql: undefined,
     billing: undefined,
     billingStore: undefined,
+    readinessExecutor: undefined,
     async close(): Promise<void> {
       /* in-memory runtime: nothing to close */
     },
@@ -251,6 +259,7 @@ export async function buildPersistentRuntime(config: AppConfig): Promise<AppRunt
     publishBudgetSql,
     billing,
     billingStore,
+    readinessExecutor: exec,
     async close(): Promise<void> {
       sweeper?.stop();
       await exec.close();
@@ -322,6 +331,7 @@ async function auditedRun(
 ): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
   try {
     const r = await fn();
+    metrics.toolCall(tool, r.isError === true ? 'error' : 'ok');
     try {
       await ctx.auditSink?.(tool, r.isError === true ? 'error' : 'ok');
     } catch (auditErr) {
@@ -329,6 +339,7 @@ async function auditedRun(
     }
     return r;
   } catch (err) {
+    metrics.toolCall(tool, 'error');
     try {
       await ctx.auditSink?.(tool, 'error');
     } catch { /* audit must never mask the original error */ }
@@ -499,7 +510,13 @@ function withBillingGate(
     const tenant = currentTenant();
     try {
       await enforcement.gateToolCall(tenant.tenantId, tool);
+      metrics.billingGateDecision('allowed');
     } catch (err) {
+      if (err instanceof EntitlementRequiredError) {
+        metrics.billingGateDecision('no-entitlement');
+      } else if (err instanceof UsageLimitExceededError) {
+        metrics.billingGateDecision('quota-exceeded');
+      }
       if (err instanceof EntitlementRequiredError || err instanceof UsageLimitExceededError) {
         // Structured billing refusal — never a raw stack to the client.
         return {
