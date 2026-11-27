@@ -67,6 +67,15 @@
 - `npm audit` (+ `--omit=dev`) → 0 vulnerabilities; `npm run scan:secrets` → clean (tracked + untracked); `npm ls --depth=0` → exact pinned versions unchanged.
 - LIVE publishing NOT performed (no app credentials — owner-gated). `urn:li:person:{sub}` author mapping is community-verified, flagged for live confirmation (ADR-017).
 
+## M6 verification evidence (2026-11-27, observed output)
+
+- Phase 0: sandbox recycled; baseline restored via checkout develop (objects survived) — local == origin/develop == 9db2685; main 85e6683 untouched (verified before/after every push); 212/212 M5 tests re-verified before M6 work.
+- GitHub: PAT grants Contents:write ONLY (verified: pushes work; milestone/issue/PR/comment writes all 403). Reconciliation recorded machine-applyable in roadmap/ROADMAP_RECONCILIATION_M6.md; nothing deleted/closed/reassigned.
+- `npx vitest run` → "Test Files 21 passed (21) / Tests 248 passed (248)": +pg-integration 15/15 (real PG 19: migrations idempotent, executor semantics incl. ROLLBACK + numbered-placeholder binding, vault ciphertext-only + tenant isolation, state replay/TTL, ledger + **concurrent budget race found & fixed via FOR UPDATE**, auth digests, restart survival on persistent cluster) — client-compat-claude 11/11 & client-compat-chatgpt 10/10 (initialize-without-version-header rule, modern envelope Mcp-Method/Mcp-Name headers, lazy session id, 401 before protocol, confirm-gate via protocol, non-leakage, reconnect-after-restart; chatgpt suite adds logout→MCP-401 lifecycle).
+- Preflight (src/scripts/preflight.ts): validated against a real PG server (staging-shaped env → 6/6 PASS, migrations applied). Staging smoke (deploy/staging-smoke.sh): 10/10 in a live rehearsal (TLS/health/headers/401s/console/413/login/initialize); 413 check streams via stdin; initialize without version header per SDK -32020 rule (product + console client fixed too).
+- `npm run typecheck` → exit 0; `npx eslint .` → 0 errors; `npm run build` → exit 0; `npm audit` (+ --omit=dev) → 0 vulnerabilities; secret scan → clean; deps: +embedded-postgres@19.0.0-beta.20 DEV ONLY (runtime unchanged).
+- NOT done in-sandbox (honest): live Claude/ChatGPT connector tests (need public HTTPS + owner plan/credentials; checklists delivered), Docker runtime validation (no daemon; static validation), live 17.x host (tests use real PG 19; compose pins 17), GitHub API writes (PAT scope).
+
 ## M5 verification evidence (2026-11-27, observed output)
 
 - Phase 0/1: remote verified (Hugs-4-Bugs/linkedin-mcp-server); origin/develop was a single unrelated LICENSE commit (63095f2) — reconciled non-destructively via unrelated-history merge from M4 (45dd946) → 8212a5a pushed to develop BEFORE any M5 code. main stayed 85e6683 (checked before and after). Secret safety swept pre-push: tree + full history clean.

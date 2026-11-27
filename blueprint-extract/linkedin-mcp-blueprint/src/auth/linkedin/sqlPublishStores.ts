@@ -139,10 +139,16 @@ export class SqlPublishBudget {
 
   async take(tenantId: string): Promise<boolean> {
     return this.exec.with(async (tx) => {
-      const rows = await tx.query({
-        sql: `SELECT hits FROM publish_budgets WHERE tenant_id = $1`,
-        params: [tenantId],
-      });
+      // Row-level lock: on Postgres, SELECT ... FOR UPDATE makes the
+      // read-modify-write atomic under concurrent transactions (each
+      // with() runs on its own pooled client). SQLite serializes writers
+      // on one connection, where FOR UPDATE is unsupported but also
+      // unnecessary. Found by tests/integration/pg-integration.test.ts
+      // (concurrent take() exceeded capacity before this lock).
+      const selectSql = this.exec.kind === 'postgres'
+        ? `SELECT hits FROM publish_budgets WHERE tenant_id = $1 FOR UPDATE`
+        : `SELECT hits FROM publish_budgets WHERE tenant_id = $1`;
+      const rows = await tx.query({ sql: selectSql, params: [tenantId] });
       let hits: number[] = [];
       const row = rows[0];
       if (row !== undefined) {

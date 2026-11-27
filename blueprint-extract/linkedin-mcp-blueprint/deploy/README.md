@@ -42,6 +42,14 @@ Internet ──443/TLS── Caddy (auto-HTTPS) ──> app (node, 0.0.0.0:3333)
 
 ## Operations
 
+- **Preflight** (before first up and before every config change):
+  `node dist/scripts/preflight.js` — validates env shape, secret strength,
+  DB reachability and applies/verifies migrations. Compose deployments:
+  set `PREFLIGHT_COMPOSE=1` to also check `POSTGRES_PASSWORD`.
+- **Post-deploy smoke** (run against the live host URL):
+  `./deploy/staging-smoke.sh https://<host> [user] [pass]` — 10 checks:
+  TLS/health/security headers/401 enforcement/console/body cap/login/
+  authenticated MCP initialize. All must pass before connector testing.
 - **Health**: `GET /healthz` → `{ok, backend, env}` (also the container
   HEALTHCHECK).
 - **Graceful shutdown**: SIGTERM/SIGINT → stop accepting → close DB pool →
@@ -80,6 +88,12 @@ Internet ──443/TLS── Caddy (auto-HTTPS) ──> app (node, 0.0.0.0:3333)
 
 - No live deployment, no real TLS certificate obtained, no real LinkedIn
   credentials — all require owner manual action.
+- Live Claude/ChatGPT connector validation (post-deploy checklists in
+  `05_INTEGRATIONS/CLAUDE_INTEGRATION.md` and `CHATGPT_INTEGRATION.md`).
+- M6's PG integration tests run a real PostgreSQL 19 engine via the
+  `embedded-postgres` devDependency; the compose stack pins postgres:17 —
+  same dialect surface; re-run the suite + smoke against the live 17 host
+  at first staging deploy.
 - Multi-instance horizontal scale is untested (SQLite executor is
   single-process by design; Postgres executor pools per process).
 - Migrations tooling is code-defined; no `migrate:rollback` command.

@@ -1,6 +1,6 @@
 # Current State
 
-**2026-11-27 — MILESTONE 5 (remote security, persistent storage, console UI, deployment foundation) COMPLETE & VERIFIED on branch `develop` (pushed to origin/develop; main untouched). Next: Milestone 6 (client compatibility) — NOT started, awaiting owner.**
+**2026-11-27 — MILESTONE 6 (roadmap reconciliation record, staging foundation, real-Postgres tests, Claude+ChatGPT protocol compatibility) COMPLETE & VERIFIED on branch `develop` (pushed to origin/develop; main untouched). Next: Milestone 7 (security hardening) — NOT started, awaiting owner + staging bring-up.**
 
 ## Phase 0 → approval → M1 → gate → M2 timeline
 
@@ -45,6 +45,15 @@
 - **Deploy foundation**: deploy/ = Dockerfile (non-root), compose (app+Postgres17+Caddy TLS), env templates, bootstrapAdmin, runbook. NOT deployed live (owner manual action; see HANDOFF_M5 §7).
 - **Suite 212/212 (18 files)**: +25 DB integration, +21 remote-security E2E, +1 config fail-fast; all M1–M4 green (7 tests updated for genuinely-async connect()). lint 0 · audit 0/0 · scan clean.
 - **Known limits**: no live deployment/Postgres/TLS/LinkedIn credentials yet; SQLite single-process; no migrate:rollback.
+
+## M6 (2026-11-27) — staging foundation + client compatibility (branch develop)
+
+- **Baseline restored after sandbox recycle** (develop ref + objects survived; main@85e6683 untouched; 212/212 M5 tests re-verified before work).
+- **Real PostgreSQL testing** (ADR-021): embedded-postgres@19.0.0-beta.20 (DEV dep only; runtime untouched) — real PG 19 server; 15/15 tests incl. restart survival; **found+fixed a real budget-concurrency race** (`FOR UPDATE` row lock on the PG path).
+- **Staging tooling**: `src/scripts/preflight.ts` (PG-validated env/secret/DB/migration checks) + `deploy/staging-smoke.sh` (10/10 in a live rehearsal). SDK contract finding fixed in product+console: initialize must NOT carry MCP-Protocol-Version (-32020).
+- **Client compatibility**: client-compat-claude 11/11, client-compat-chatgpt 10/10 — deterministic protocol-level suites (initialize/session/tools/call/auth/errors/reconnect; confirm-gate enforced via protocol). Shared wire contract recorded in MCP_CLIENT_COMPATIBILITY.md. LIVE connector tests NOT performed (owner-side checklists in CLAUDE_/CHATGPT_INTEGRATION.md).
+- **GitHub limitation (verified)**: PAT = Contents:write only — milestones/issues/PRs API writes 403. Intended reconciliation recorded machine-applyable in roadmap/ROADMAP_RECONCILIATION_M6.md (10 milestones mapped to 7 execution milestones; no deletes/closes/reassigns). M6 delivered as direct commits on develop; owner opens/merges PRs.
+- **Suite 248/248 (21 files)**: +15 PG, +11 Claude, +10 ChatGPT, + config additions; lint 0 · audit 0/0 · scan clean.
 
 ## M1 facts (verified)
 

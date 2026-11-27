@@ -29,6 +29,7 @@
     "@modelcontextprotocol/client": "^2.4.0",
     "@types/node": "24.19.4",
     "@types/pg": "8.15.6",
+    "embedded-postgres": "19.0.0-beta.20",
     "eslint": "10.15.0",
     "jiti": "^2.7.0",
     "tsx": "4.23.15",

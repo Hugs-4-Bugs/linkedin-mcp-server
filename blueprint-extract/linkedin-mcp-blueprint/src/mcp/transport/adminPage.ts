@@ -227,13 +227,15 @@ let mcpSession = null;
 const PROTO = 'io.modelcontextprotocol/protocolVersion';
 
 async function mcpInitialize() {
+  // NOTE: initialize is the legacy handshake — it must NOT carry
+  // MCP-Protocol-Version (the SDK rejects the mismatch with -32020).
+  // Post-initialize requests set the header (see mcpCall).
   const r = await fetch('/mcp', {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
       'content-type': 'application/json',
       'accept': 'application/json, text/event-stream',
-      'mcp-protocol-version': '2026-07-28',
     },
     body: JSON.stringify({
       jsonrpc: '2.0', id: 1, method: 'initialize',
