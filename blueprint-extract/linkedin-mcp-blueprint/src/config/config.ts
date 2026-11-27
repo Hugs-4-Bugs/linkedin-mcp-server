@@ -13,6 +13,46 @@ export type Environment = (typeof ENVIRONMENTS)[number];
 /** Fixed self-serve scope set (ADR-012, owner decision D-A1). */
 export const LINKEDIN_SCOPES = ['openid', 'profile', 'email', 'w_member_social'] as const;
 
+/**
+ * Explicit env boolean parsing: accepts ONLY the strings 'true' and 'false'
+ * (case-insensitive, trimmed) — and the literal booleans for non-env callers.
+ * Anything else is malformed and fails safely (ConfigError at startup) rather
+ * than falling back to JS truthiness. This matters because
+ * `z.coerce.boolean()` applies `Boolean()`, so the string 'false' would
+ * coerce to `true` and silently ENABLE billing for an operator who
+ * explicitly disabled it (M9 verification defect 1).
+ */
+export function parseEnvBoolean(value: string | boolean | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'boolean') return value;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  // Malformed ('yes', '0', 'off', garbage): fail safely by rejecting.
+  throw new ConfigError([
+    { path: ['BILLING_ENABLED'], message: `must be 'true' or 'false', got '${value}'` },
+  ] as never);
+}
+
+/**
+ * Zod-backed env string boolean: 'true' → true, 'false' → false, unset →
+ * default. Malformed values surface as normal zod validation failures
+ * (fail-fast at startup), never truthiness coercion.
+ */
+function envBoolean(defaultValue: boolean) {
+  return z
+    .union([z.literal(true), z.literal(false), z.string()])
+    .transform((v, ctx) => {
+      if (typeof v === 'boolean') return v;
+      const normalized = v.trim().toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+      ctx.issues.push({ code: 'custom', input: v, message: `must be 'true' or 'false', got '${v}'` });
+      return z.NEVER;
+    })
+    .default(defaultValue);
+}
+
 const ConfigSchema = z.object({
   ENVIRONMENT: z.enum(ENVIRONMENTS),
   SERVER_NAME: z.string().min(1).default('linkedin-mcp-server'),
@@ -68,7 +108,9 @@ const ConfigSchema = z.object({
   // payment, billing APIs or entitlement services (issue #14 constraint).
   // Enabling requires hosted persistence (DATABASE_URL) + a webhook secret
   // (fail-closed cross-field rule below) — test-mode only (ADR-024).
-  BILLING_ENABLED: z.coerce.boolean().default(false),
+  // NOTE: explicit envBoolean, NOT z.coerce.boolean — the string 'false'
+  // must never coerce to true (M9 verification defect 1).
+  BILLING_ENABLED: envBoolean(false),
   // Razorpay webhook secret (dashboard-configured; test mode in staging).
   // Secret material: never logged (billing logger redaction is test-covered).
   RAZORPAY_WEBHOOK_SECRET: z.string().min(16).optional(),

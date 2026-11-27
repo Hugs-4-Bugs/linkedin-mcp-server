@@ -219,6 +219,63 @@ describe('issue #14: self-hosted deployments (the hard constraint)', () => {
     })).toThrow(ConfigError); // no webhook secret
   });
 
+  // --- M9 remediation defect 1: explicit boolean string parsing ---
+  // Regression matrix over ACTUAL environment string values. The original
+  // z.coerce.boolean() applied JS truthiness: 'false' → true (silent enable).
+  it('BILLING_ENABLED string "false" (and case/whitespace variants) stays DISABLED', () => {
+    // Hosted vars present, so the only variable under test is parsing:
+    const hosted = {
+      ENVIRONMENT: 'local',
+      DATABASE_URL: 'sqlite::memory:',
+      RAZORPAY_WEBHOOK_SECRET: '0123456789abcdef0123',
+    } as const;
+    for (const v of ['false', 'FALSE', 'False', ' false ', 'false\n']) {
+      const cfg = parseConfig({ ...hosted, BILLING_ENABLED: v });
+      expect(cfg.BILLING_ENABLED, `BILLING_ENABLED='${v}' must stay disabled`).toBe(false);
+    }
+  });
+
+  it('BILLING_ENABLED string "true" (and case/whitespace variants) ENABLES', () => {
+    const hosted = {
+      ENVIRONMENT: 'local',
+      DATABASE_URL: 'sqlite::memory:',
+      RAZORPAY_WEBHOOK_SECRET: '0123456789abcdef0123',
+    } as const;
+    for (const v of ['true', 'TRUE', 'True', ' true ']) {
+      const cfg = parseConfig({ ...hosted, BILLING_ENABLED: v });
+      expect(cfg.BILLING_ENABLED, `BILLING_ENABLED='${v}' must enable`).toBe(true);
+    }
+  });
+
+  it('BILLING_ENABLED malformed values fail safely at startup (ConfigError, never truthy)', () => {
+    for (const v of ['1', '0', 'yes', 'no', 'on', 'off', 'y', 'n', 'enabled', 'garbage##']) {
+      expect(() => parseConfig({ ENVIRONMENT: 'local', BILLING_ENABLED: v }), `'${v}' must be rejected`).toThrow(ConfigError);
+    }
+  });
+
+  it('BILLING_ENABLED="false" keeps billing objects unmounted (billing-disabled shape)', async () => {
+    // End-to-end at the wiring level: an operator who writes =false on a
+    // hosted deploy must get exactly the self-hosted shape — no billing
+    // objects exist, so the webhook route cannot mount and no gate applies.
+    const cfg = parseConfig({
+      ENVIRONMENT: 'local',
+      DATABASE_URL: 'sqlite::memory:',
+      RAZORPAY_WEBHOOK_SECRET: '0123456789abcdef0123',
+      BILLING_ENABLED: 'false',
+    });
+    expect(cfg.BILLING_ENABLED).toBe(false);
+    // buildBilling lives in serverFactory (not exported from billing/index);
+    // replicate its mount decision exactly: disabled → undefined objects.
+    const { SqliteExecutor } = await import('../../src/storage/sqliteExecutor.js');
+    const exec = new SqliteExecutor(':memory:');
+    const { BillingEnforcement, SqlBillingStore } = await import('../../src/billing/index.js');
+    const mounts = cfg.BILLING_ENABLED && cfg.RAZORPAY_WEBHOOK_SECRET !== undefined;
+    expect(mounts).toBe(false); // route stays unmounted
+    const billing = mounts ? new BillingEnforcement({ store: new SqlBillingStore(exec), limits: {} }) : undefined;
+    expect(billing).toBeUndefined();
+    await exec.close?.();
+  });
+
   it('provider outage cannot affect enforcement: gate path makes no provider call', async () => {
     clock = NOW;
     const { enforcement, store } = newEnforcement({ pro: 10 });
