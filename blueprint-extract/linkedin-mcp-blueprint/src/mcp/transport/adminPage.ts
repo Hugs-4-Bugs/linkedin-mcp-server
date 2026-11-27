@@ -173,6 +173,7 @@ export const ADMIN_PAGE_HTML = `<!DOCTYPE html>
       <a class="navitem active" data-view="overview" id="nav-overview"><span class="dot idle" id="dot-conn"></span>Overview</a>
       <a class="navitem" data-view="composer" id="nav-composer">Composer</a>
       <a class="navitem" data-view="activity" id="nav-activity">Activity</a>
+      <a class="navitem" data-view="billing" id="nav-billing">Billing</a>
       <a class="navitem" data-view="settings" id="nav-settings">Settings</a>
     </nav>
     <main id="main"></main>
@@ -326,7 +327,217 @@ function switchView(v) {
   if (v === 'overview') renderOverview();
   else if (v === 'composer') renderComposer();
   else if (v === 'activity') renderActivity();
+  else if (v === 'billing') renderBilling();
   else if (v === 'settings') renderSettings();
+}
+
+/* ---- Billing (M9 issues #13/#14) ---- */
+let billingData = null; // last server payload (for refresh + tests)
+
+async function renderBilling() {
+  const main = $('main');
+  main.innerHTML = '<div class="section-title">Billing</div><div class="loading">Loading billing state…</div>';
+  let data = null;
+  let failure = null;
+  try {
+    const r = await fetch('/api/billing/summary', { credentials: 'same-origin', headers: { accept: 'application/json' } });
+    if (r.status === 404) failure = 'unavailable';
+    else if (r.status === 401) failure = 'auth';
+    else if (r.status !== 200) failure = 'server:' + r.status;
+    else data = await r.json();
+  } catch { failure = 'network'; }
+  billingData = data;
+  main.innerHTML = '';
+  main.appendChild(billingShell());
+  if (failure === 'unavailable') {
+    // Self-hosted (billing disabled) or route unmounted: honest state.
+    renderBillingUnavailable();
+    return;
+  }
+  if (failure === 'auth') { renderBillingError('Session expired — sign in again to view billing.'); return; }
+  if (failure === 'network') { renderBillingError('Network error reaching the billing API. Retry below.'); return; }
+  if (failure) { renderBillingError('The billing API returned an error (' + failure.replace('server:', 'HTTP ') + '). Retry below.'); return; }
+  renderBillingDashboard(data);
+}
+
+function billingShell() {
+  const wrap = document.createElement('div');
+  wrap.innerHTML =
+    '<div class="panel" id="b-unavail" style="display:none"><div class="panel-head"><h3>Hosted billing</h3><span class="hint">operator mode</span></div><div class="panel-body" id="b-unavail-body"></div></div>' +
+    '<div id="b-dashboard" style="display:none"></div>';
+  return wrap;
+}
+
+function renderBillingUnavailable() {
+  $('b-unavail').style.display = '';
+  $('b-unavail-body').innerHTML =
+    '<div class="notice info show" style="display:block;margin-bottom:12px">This deployment runs <b>self-hosted mode</b>: hosted payment and entitlement services are not enabled. All tools work without a subscription.</div>' +
+    '<dl class="kv">' +
+    '<dt>Billing mode</dt><dd>self-hosted (disabled)</dd>' +
+    '<dt>Subscription</dt><dd>not applicable</dd>' +
+    '<dt>Usage metering</dt><dd>none — no quota enforcement in this mode</dd>' +
+    '</dl>' +
+    '<div style="color:var(--ink-3);font-size:12px;margin-top:10px">Enabled billing requires operator configuration (BILLING_ENABLED with hosted persistence).</div>';
+}
+
+function renderBillingError(msg) {
+  $('b-unavail').style.display = '';
+  $('b-unavail-body').innerHTML =
+    '<div class="notice err show" style="display:block;margin-bottom:12px">' + esc(msg) + '</div>' +
+    '<button class="btn" id="b-retry">Retry</button>';
+  $('b-retry').addEventListener('click', renderBilling);
+}
+
+function pillForStatus(s) {
+  const map = {
+    active: ['ok', 'active'], trial: ['ok', 'trial'], past_due: ['warn', 'past due (in grace)'],
+    canceled: ['bad', 'canceled'], revoked: ['bad', 'revoked'], expired: ['bad', 'expired'],
+  };
+  const m = map[s] || ['idle', String(s || 'unknown')];
+  return '<span class="pill ' + m[0] + '">' + esc(m[1]) + '</span>';
+}
+
+function renderBillingDashboard(d) {
+  $('b-dashboard').style.display = '';
+  const sub = d.subscription;
+  const u = d.usage;
+  const planOf = sub && sub.planId ? sub.planId : null;
+  const pct = u && u.limit > 0 ? Math.min(100, Math.round((u.used / u.limit) * 100)) : (u && u.limit === 0 ? 100 : 0);
+
+  const panels = [];
+  // --- Subscription panel (only when a subscription exists) ---
+  if (sub) {
+    const grace = sub.entitlementStatus === 'past_due' && sub.graceEndsAt
+      ? new Date(sub.graceEndsAt).toISOString().slice(0, 10) : null;
+    panels.push('<div class="panel"><div class="panel-head"><h3>Current subscription</h3><span class="hint">server-authoritative</span></div><div class="panel-body">' +
+      '<dl class="kv">' +
+      '<dt>Plan</dt><dd>' + esc(sub.planId) + '</dd>' +
+      '<dt>Entitlement</dt><dd>' + pillForStatus(sub.entitlementStatus) + (sub.usable ? ' <span class="pill ok">usable</span>' : ' <span class="pill bad">not usable</span>') + '</dd>' +
+      '<dt>Provider status</dt><dd>' + esc(sub.providerStatus) + '</dd>' +
+      '<dt>Subscription ID</dt><dd>' + esc(sub.subscriptionId) + '</dd>' +
+      '<dt>Updated</dt><dd>' + (sub.updatedAt ? new Date(sub.updatedAt).toISOString() : '—') + '</dd>' +
+      (grace ? '<dt>Grace ends</dt><dd>' + esc(grace) + '</dd>' : '') +
+      '</dl>' +
+      '<div class="toolbar" style="margin-top:12px">' +
+      '<button class="btn danger" id="b-cancel">Cancel subscription…</button>' +
+      '<button class="btn" id="b-refresh">Refresh</button>' +
+      '</div>' +
+      '<div class="notice err" id="b-cancel-err"></div>' +
+      '<div class="notice ok" id="b-cancel-ok"></div>' +
+      '<div class="confirm-box" id="b-cancel-confirm">' +
+      '<input type="checkbox" id="b-cancel-check">' +
+      '<div><b>Request cancellation.</b> The subscription remains active until the provider confirms the cancellation through a verified webhook — this console cannot revoke it locally.</div></div>' +
+      '</div></div>');
+  } else {
+    panels.push('<div class="panel"><div class="panel-head"><h3>Current subscription</h3><span class="hint">none</span></div><div class="panel-body">' +
+      '<div class="empty">No subscription on this tenant yet. Choose a plan below to start hosted checkout (test mode).</div>' +
+      '<button class="btn" id="b-refresh">Refresh</button></div></div>');
+  }
+
+  // --- Usage panel ---
+  panels.push('<div class="panel"><div class="panel-head"><h3>Usage this period</h3><span class="hint">' + esc(String(u ? u.periodDays : '')) + '-day metering window · ' + esc(String(d.billingMode || '')) + '</span></div><div class="panel-body">' +
+    '<dl class="kv">' +
+    '<dt>Used</dt><dd>' + esc(String(u ? u.used : 0)) + ' of ' + esc(String(u ? u.limit : 0)) + ' tool calls</dd>' +
+    '<dt>Remaining</dt><dd>' + esc(String(u ? u.remaining : 0)) + '</dd>' +
+    '</dl>' +
+    '<div style="margin-top:10px">' +
+    '<div style="height:8px;background:#eef0f4;border:1px solid var(--line);border-radius:2px;overflow:hidden">' +
+    '<div style="height:100%;width:' + pct + '%;background:' + (pct >= 100 ? 'var(--bad)' : pct >= 80 ? 'var(--warn)' : 'var(--accent)') + '"></div></div>' +
+    '<div style="color:var(--ink-3);font-size:11.5px;margin-top:4px">' + pct + '% of the monthly allowance consumed</div>' +
+    '</div>' +
+    (u && u.exhausted ? '<div class="notice err show" style="display:block;margin-top:10px">Plan usage limit reached for this billing period. Tool calls that consume quota are refused by the server until the period resets or the plan changes.</div>' : '') +
+    '</div></div>');
+
+  // --- Plans panel ---
+  const plans = d.plans || [];
+  const rows = plans.map((p) => {
+    const current = planOf === p.planId;
+    const price = p.priceInr !== null ? '₹' + String(p.priceInr) + ' / month' : 'price on request';
+    return '<tr>' +
+      '<td class="mono">' + esc(p.planId) + '</td>' +
+      '<td>' + esc(String(p.monthlyToolCalls)) + ' tool calls / month</td>' +
+      '<td>' + esc(price) + '</td>' +
+      '<td>' + (current ? '<span class="pill ok">current</span>' : '<button class="btn tiny b-choose" data-plan="' + esc(p.planId) + '">Choose ' + esc(p.planId) + '…</button>') + '</td>' +
+      '</tr>';
+  }).join('');
+  panels.push('<div class="panel"><div class="panel-head"><h3>Plans</h3><span class="hint">server catalog · Razorpay test mode</span></div><div class="panel-body">' +
+    (rows ? '<table><thead><tr><th>Plan</th><th>Allowance</th><th>Price</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="empty">The operator has not configured any plans (BILLING_PLAN_LIMITS empty).</div>') +
+    '<div class="notice err" id="b-plan-err"></div>' +
+    '<div class="notice info" id="b-plan-info"></div>' +
+    '</div></div>');
+
+  $('b-dashboard').innerHTML = panels.join('');
+  const refresh = $('b-refresh');
+  if (refresh) refresh.addEventListener('click', renderBilling);
+
+  // Checkout buttons
+  document.querySelectorAll('.b-choose').forEach((b) => {
+    b.addEventListener('click', async () => {
+      hide('b-plan-err'); hide('b-plan-info');
+      const planId = b.dataset.plan;
+      const r = await fetch('/api/billing/checkout', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': M.csrf || '', accept: 'application/json' },
+        body: JSON.stringify({ planId }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.status !== 200) {
+        $('b-plan-err').textContent = 'Checkout failed: ' + esc(body.error || ('HTTP ' + r.status));
+        if (r.status === 403) $('b-plan-err').textContent = 'Checkout blocked: CSRF token missing or stale. Reload the console and retry.';
+        $('b-plan-err').classList.add('show');
+        return;
+      }
+      // Pending state: the provider payment page completes OUTSIDE this UI.
+      // Entitlement activates only via verified webhook (server-side).
+      const info = $('b-plan-info');
+      info.innerHTML = '<b>Checkout initiated (' + esc(body.planId) + ' · ' + (body.priceInr !== null ? '₹' + String(body.priceInr) : 'price on request') + ').</b> ' +
+        'Payment confirmation is pending: access activates only after the payment provider confirms via webhook and the server verifies it. This page never unlocks access on its own. ' +
+        '<b>Payment pending — subscription not yet active.</b>';
+      info.classList.add('show');
+      if (typeof activityLog !== 'undefined') {
+        activityLog.push({ time: new Date().toISOString().slice(11, 19), op: 'billing:checkout:' + planId, ok: true });
+      }
+    });
+  });
+
+  // Cancel flow (two gates: arm checkbox, then confirm() dialog)
+  const cancelBtn = $('b-cancel');
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', () => {
+      hide('b-cancel-err'); hide('b-cancel-ok');
+      if (!$('b-cancel-confirm').classList.contains('show')) {
+        $('b-cancel-confirm').classList.add('show');
+        return;
+      }
+      if (!$('b-cancel-check').checked) {
+        $('b-cancel-err').textContent = 'Arm the confirmation checkbox first — cancellation requires an explicit confirmation.';
+        $('b-cancel-err').classList.add('show');
+        return;
+      }
+      if (!confirm('Request cancellation of the ' + planOf + ' subscription?')) return;
+      void (async () => {
+        cancelBtn.disabled = true;
+        const r = await fetch('/api/billing/cancel', {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'content-type': 'application/json', 'x-csrf-token': M.csrf || '', accept: 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const body = await r.json().catch(() => ({}));
+        cancelBtn.disabled = false;
+        if (r.status !== 200) {
+          $('b-cancel-err').textContent = 'Cancellation request failed: ' + esc(body.error || ('HTTP ' + r.status));
+          if (r.status === 403) $('b-cancel-err').textContent = 'Cancellation blocked: CSRF token missing or stale. Reload the console and retry.';
+          $('b-cancel-err').classList.add('show');
+          return;
+        }
+        $('b-cancel-ok').textContent = 'Cancellation requested. The subscription remains active until the provider confirms via webhook — refresh to see the authoritative state.';
+        $('b-cancel-ok').classList.add('show');
+        $('b-cancel-confirm').classList.remove('show');
+        $('b-cancel-check').checked = false;
+        setTimeout(renderBilling, 1200);
+      })();
+    });
+  }
 }
 
 /* ---- Overview ---- */
