@@ -249,6 +249,73 @@ describe('user auth store on PostgreSQL', () => {
   });
 });
 
+describe('M7 retention on real PostgreSQL (issue #16)', () => {
+  const sweepTenant = 'pg-sweep-tenant';
+  it('RetentionSweeper deletes expired rows per class on PG', async () => {
+    const { RetentionSweeper } = await import('../../src/storage/retention.js');
+    const sw = new RetentionSweeper(exec);
+    // expired oauth_state
+    await exec.execute({
+      sql: `INSERT INTO oauth_states (state, tenant_id, redirect_uri, expires_at)
+            VALUES ($1, $2, 'pending', $3)`,
+      params: ['pg-sweep-state', sweepTenant, new Date(Date.now() - 60_000).toISOString()],
+    });
+    // ended publish op past the horizon
+    await exec.execute({
+      sql: `INSERT INTO publish_operations (tenant_id, content_hash, state, ended_at, started_at)
+            VALUES ($1, 'pg-sweep-hash', 'success', $2, $2)`,
+      params: [sweepTenant, new Date(Date.now() - 3_600_000).toISOString()],
+    });
+    // audit row past retention
+    await exec.execute({
+      sql: 'INSERT INTO audit_log (tenant_id, actor, action) VALUES ($1, $2, $3)',
+      params: [sweepTenant, 'probe', 'retention'],
+    });
+    await exec.execute({
+      sql: 'UPDATE audit_log SET created_at = $1 WHERE tenant_id = $2 AND actor = $3',
+      params: [new Date(Date.now() - (90 * 86_400_000 + 3_600_000)).toISOString(), sweepTenant, 'probe'],
+    });
+    const r = await sw.sweep();
+    expect(r.deleted.oauth_states).toBe(1);
+    expect(r.deleted.publish_operations).toBe(1);
+    expect(r.deleted.audit_log).toBe(1);
+    // idempotent second sweep
+    const r2 = await sw.sweep();
+    expect(r2.deleted.oauth_states).toBe(0);
+  });
+
+  it('account removal cascades on PG (transactional deleteUser)', async () => {
+    const store = new UserAuthStore(exec, 3_600_000);
+    const u = await store.createUser('pg-rm-user', 'pg-rm-pass-12345');
+    await store.issueSession(u);
+    await store.issueApiToken(u.tenantId, 'pg-rm');
+    await store.audit(u.tenantId, 'user', 'login', 'probe');
+    await exec.execute({
+      sql: `INSERT INTO publish_budgets (tenant_id, window_ms, capacity, hits)
+            VALUES ($1, 86400000, 2, '[]')`,
+      params: [u.tenantId],
+    });
+    expect(await store.deleteUser(u.id)).toBe(1);
+    const rows = await exec.query({ sql: 'SELECT id FROM users WHERE id = $1', params: [u.id] });
+    expect(rows.length).toBe(0);
+    // tenant-owned rows all gone
+    for (const sql of [
+      'SELECT * FROM api_tokens WHERE tenant_id = $1',
+      'SELECT * FROM audit_log WHERE tenant_id = $1',
+      'SELECT * FROM publish_budgets WHERE tenant_id = $1',
+    ]) {
+      const r = await exec.query({ sql, params: [u.tenantId] });
+      expect(r.length).toBe(0);
+    }
+    // this user's sessions cascaded (earlier tests' sessions may remain)
+    const sess = await exec.query({
+      sql: 'SELECT * FROM sessions s JOIN users u ON s.user_id = u.id WHERE u.username = $1',
+      params: ['pg-rm-user'],
+    });
+    expect(sess.length).toBe(0);
+  });
+});
+
 describe('restart survival on PostgreSQL (stop server, start new one)', () => {
   it('tokens/ledger/budget survive a server restart', async () => {
     // Stop the shared server, start a NEW instance on the SAME data dir
