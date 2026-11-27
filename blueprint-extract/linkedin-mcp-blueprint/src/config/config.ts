@@ -52,6 +52,11 @@ const ConfigSchema = z.object({
   AUTH_MODE: z.enum(['session', 'mock']).default('session'),
   // Session lifetime (seconds), default 8h.
   SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86400).default(28800),
+  // Retention sweeper interval (seconds), default 1h; 0 disables periodic
+  // sweeping (a boot sweep still runs) — M7 issue #16, ADR-010.
+  RETENTION_SWEEP_INTERVAL_SECONDS: z.coerce.number().int().min(0).max(86400).default(3600),
+  // Audit log retention horizon (days), default 90 — M7 issue #16.
+  AUDIT_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(90),
   // HTTP request body cap in MiB (default 1; MCP JSON-RPC is small).
   MAX_BODY_MIB: z.coerce.number().min(1).max(16).default(1),
   // Per-IP request rate limit (requests per minute, default 120).

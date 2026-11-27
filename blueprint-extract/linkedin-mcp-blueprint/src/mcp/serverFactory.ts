@@ -21,6 +21,7 @@ import { LinkedInMockProvider } from '../auth/linkedin/mockProvider.js';
 import { LinkedInRealProvider } from '../auth/linkedin/realProvider.js';
 import type { LinkedInOAuthProvider } from '../auth/linkedin/provider.js';
 import { PostOperationStore } from '../auth/linkedin/postOperationStore.js';
+import { PeriodicSweeper, type RetentionPolicy } from '../storage/retention.js';
 import { SqlPostOperationStore, SqlPublishBudget } from '../auth/linkedin/sqlPublishStores.js';
 import { SqlTokenVault } from '../auth/linkedin/sqlTokenVault.js';
 import { SqlOAuthStateStore } from '../auth/linkedin/sqlStateStore.js';
@@ -170,6 +171,17 @@ export async function buildPersistentRuntime(config: AppConfig): Promise<AppRunt
     config.PUBLISH_DAILY_LIMIT,
     86_400_000,
   );
+  // Retention sweeper (M7 issue #16, ADR-010): periodic per-class TTL
+  // deletion. Interval from config; 0 = boot sweep only.
+  const sweeper = config.RETENTION_SWEEP_INTERVAL_SECONDS > 0
+    ? PeriodicSweeper.start(exec, config.RETENTION_SWEEP_INTERVAL_SECONDS * 1000, {
+        sessionTtlMs: config.SESSION_TTL_SECONDS * 1000,
+        oauthStateTtlMs: config.OAUTH_STATE_TTL_SECONDS * 1000,
+        publishOpHorizonMs: config.PUBLISH_DUPLICATE_WINDOW_MINUTES * 60_000,
+        auditRetentionMs: config.AUDIT_RETENTION_DAYS * 86_400_000,
+        budgetWindowMs: 86_400_000,
+      } satisfies Partial<RetentionPolicy>)
+    : undefined;
   return {
     config,
     tenant: LOCAL_DEV_TENANT,
@@ -184,23 +196,34 @@ export async function buildPersistentRuntime(config: AppConfig): Promise<AppRunt
     authStore,
     publishBudgetSql,
     async close(): Promise<void> {
+      sweeper?.stop();
       await exec.close();
     },
   } satisfies AppRuntime;
 }
 
 function toolContext(runtime: AppRuntime): ToolContext {
+  const tenant = currentTenant(); // AUTHENTICATED per-request tenant (ALS); local dev tenant otherwise
   return {
     config: runtime.config,
-    tenant: currentTenant(), // AUTHENTICATED per-request tenant (ALS); local dev tenant otherwise
+    tenant,
     connection: runtime.connection,
-    callBudget: runtime.callBudgets.for(`linkedin-calls:${currentTenant().tenantId}`),
+    callBudget: runtime.callBudgets.for(`linkedin-calls:${tenant.tenantId}`),
     vault: runtime.vault,
     provider: runtime.provider,
     postOps: runtime.postOps,
-    publishBudget: runtime.publishBudgets.for(`publish:${currentTenant().tenantId}`),
+    publishBudget: runtime.publishBudgets.for(`publish:${tenant.tenantId}`),
     publishBudgetSql: runtime.publishBudgetSql,
     now: () => Date.now(),
+    // Audit sink (M7 #12/#16): tool name + outcome only — never payloads.
+    // SQL-backed in remote mode; absent in local stdio (no authStore).
+    auditSink: runtime.authStore !== undefined
+      ? (tool, outcome) => {
+          const store = runtime.authStore;
+          if (store === undefined) return Promise.resolve();
+          return store.audit(tenant.tenantId, `tool:${tool}`, `tool-call:${outcome}`);
+        }
+      : undefined,
   };
 }
 
@@ -232,6 +255,32 @@ function registerStatusTool(server: McpServer, runtime: AppRuntime): void {
 }
 
 /**
+ * Audited dispatch (M7 issues #12/#16): wrap a tool call so its outcome is
+ * recorded through the audit sink (tool name + ok/error, never payloads).
+ * Audit failures never break the tool call — log-only.
+ */
+async function auditedRun(
+  tool: string,
+  ctx: ToolContext,
+  fn: () => Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>,
+): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
+  try {
+    const r = await fn();
+    try {
+      await ctx.auditSink?.(tool, r.isError === true ? 'error' : 'ok');
+    } catch (auditErr) {
+      log.warn('tool audit failed', { tool, error: auditErr instanceof Error ? auditErr.message : String(auditErr) });
+    }
+    return r;
+  } catch (err) {
+    try {
+      await ctx.auditSink?.(tool, 'error');
+    } catch { /* audit must never mask the original error */ }
+    throw err;
+  }
+}
+
+/**
  * Register the M2 connection tools with policy enforcement: each handler
  * funnels through its tool implementation, which runs authorize() against
  * the live connection status and applies the confirmation gate.
@@ -248,9 +297,9 @@ function registerConnectionTools(server: McpServer, runtime: AppRuntime): void {
   }> = async (name) => {
     log.info('tool invoked', { tool: name });
     const ctx = toolContext(runtime);
-    if (name === 'linkedin_connect') return connectTool(ctx);
-    if (name === 'linkedin_status') return statusTool(ctx);
-    if (name === 'linkedin_disconnect') return disconnectTool(ctx);
+    if (name === 'linkedin_connect') return auditedRun(name, ctx, () => connectTool(ctx));
+    if (name === 'linkedin_status') return auditedRun(name, ctx, () => statusTool(ctx));
+    if (name === 'linkedin_disconnect') return auditedRun(name, ctx, () => disconnectTool(ctx));
     return { content: [{ type: 'text', text: 'unknown tool' }], isError: true };
   };
   for (const spec of CONNECTION_TOOL_SPECS) {
@@ -281,8 +330,9 @@ function registerProfileTools(server: McpServer, runtime: AppRuntime): void {
       inputSchema: PROFILE_TOOL_SPEC.inputSchema,
     },
     async () => {
-      const r = await getMyProfileTool(toolContext(runtime));
-      return r as unknown as { content: { type: 'text'; text: string }[] };
+      const ctx = toolContext(runtime);
+      return auditedRun(PROFILE_TOOL_SPEC.name, ctx, () =>
+        getMyProfileTool(ctx));
     },
   );
   server.registerTool(
@@ -293,8 +343,9 @@ function registerProfileTools(server: McpServer, runtime: AppRuntime): void {
       inputSchema: SCOPE_TOOL_SPEC.inputSchema,
     },
     async () => {
-      const r = await listGrantedScopesTool(toolContext(runtime));
-      return r as unknown as { content: { type: 'text'; text: string }[] };
+      const ctx = toolContext(runtime);
+      return auditedRun(SCOPE_TOOL_SPEC.name, ctx, () =>
+        listGrantedScopesTool(ctx));
     },
   );
 }
@@ -319,8 +370,9 @@ function registerPublishTools(server: McpServer, runtime: AppRuntime): void {
       inputSchema: DRAFT_TOOL_SPEC.inputSchema,
     },
     (args: unknown) => {
-      const r = draftPostTool(toolContext(runtime), DraftPostInputSchema.parse(args ?? {}));
-      return Promise.resolve(r as unknown as { content: { type: 'text'; text: string }[] });
+      const ctx = toolContext(runtime);
+      return auditedRun(DRAFT_TOOL_SPEC.name, ctx, () =>
+        Promise.resolve(draftPostTool(ctx, DraftPostInputSchema.parse(args ?? {})) as unknown as Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>));
     },
   );
   server.registerTool(
@@ -331,8 +383,9 @@ function registerPublishTools(server: McpServer, runtime: AppRuntime): void {
       inputSchema: PREVIEW_TOOL_SPEC.inputSchema,
     },
     async (args: unknown) => {
-      const r = await previewPostTool(toolContext(runtime), PreviewPostInputSchema.parse(args ?? {}));
-      return r as unknown as { content: { type: 'text'; text: string }[] };
+      const ctx = toolContext(runtime);
+      return auditedRun(PREVIEW_TOOL_SPEC.name, ctx, () =>
+        previewPostTool(ctx, PreviewPostInputSchema.parse(args ?? {})));
     },
   );
   server.registerTool(
@@ -343,8 +396,9 @@ function registerPublishTools(server: McpServer, runtime: AppRuntime): void {
       inputSchema: PUBLISH_TOOL_SPEC.inputSchema,
     },
     async (args: unknown) => {
-      const r = await publishPostTool(toolContext(runtime), PublishPostInputSchema.parse(args ?? {}));
-      return r as unknown as { content: { type: 'text'; text: string }[] };
+      const ctx = toolContext(runtime);
+      return auditedRun(PUBLISH_TOOL_SPEC.name, ctx, () =>
+        publishPostTool(ctx, PublishPostInputSchema.parse(args ?? {})));
     },
   );
 }

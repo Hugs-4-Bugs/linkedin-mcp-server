@@ -249,4 +249,37 @@ export class UserAuthStore {
       params: [tenantId, actor, action, detail ?? null],
     });
   }
+
+  /**
+   * Account removal (M7, issue #16): delete the user AND every row that
+   * belongs to the user's tenant, in ONE transaction — sessions and API
+   * tokens (auth artifacts), the LinkedIn token set (sealed ciphertext),
+   * publish ledger/budget rows, and the audit trail for that tenant.
+   * sessions cascade via FK; the rest is explicit because their tables are
+   * tenant-keyed, not user-keyed. The user row goes last.
+   *
+   * Returns the number of tenant-owned row groups found, or 0 when the
+   * user (or their tenant) does not exist. Never logs contents.
+   */
+  async deleteUser(userId: string): Promise<number> {
+    return this.exec.with(async (tx) => {
+      const rows = await tx.query({
+        sql: 'SELECT id, tenant_id FROM users WHERE id = $1',
+        params: [userId],
+      });
+      const user = rows[0];
+      if (user === undefined) return 0;
+      const tenantId = asString(user.tenant_id);
+
+      await tx.execute({ sql: 'DELETE FROM linkedin_tokens WHERE tenant_id = $1', params: [tenantId] });
+      await tx.execute({ sql: 'DELETE FROM publish_operations WHERE tenant_id = $1', params: [tenantId] });
+      await tx.execute({ sql: 'DELETE FROM publish_budgets WHERE tenant_id = $1', params: [tenantId] });
+      await tx.execute({ sql: 'DELETE FROM audit_log WHERE tenant_id = $1', params: [tenantId] });
+      await tx.execute({ sql: 'DELETE FROM api_tokens WHERE tenant_id = $1', params: [tenantId] });
+      // sessions + any remaining tenant rows go via the users FK cascade.
+      const n = await tx.execute({ sql: 'DELETE FROM users WHERE id = $1', params: [userId] });
+      log.info('account removed', { userId, tenants: 1, rows: n });
+      return n > 0 ? 1 : 0;
+    });
+  }
 }
