@@ -49,12 +49,12 @@ export function generateVaultKey(): string {
   return randomBytes(32).toString('base64');
 }
 
-interface Sealed {
+export interface Sealed {
   iv: string; // base64, 12 bytes
   ct: string; // base64 ciphertext+tag
 }
 
-function seal(key: Buffer, plaintext: string): Sealed {
+export function seal(key: Buffer, plaintext: string): Sealed {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
@@ -62,7 +62,7 @@ function seal(key: Buffer, plaintext: string): Sealed {
   return { iv: iv.toString('base64'), ct: Buffer.concat([ct, tag]).toString('base64') };
 }
 
-function unseal(key: Buffer, sealed: Sealed): string {
+export function unseal(key: Buffer, sealed: Sealed): string {
   const raw = Buffer.from(sealed.ct, 'base64');
   const ct = raw.subarray(0, raw.length - 16);
   const tag = raw.subarray(raw.length - 16);

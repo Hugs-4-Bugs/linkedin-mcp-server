@@ -1,0 +1,10 @@
+# Caddy reverse proxy: automatic HTTPS on the public hostname.
+# Substitute the real domain at deploy time (see deploy/README.md).
+{$PUBLIC_HOSTNAME} {
+	reverse_proxy app:3333
+
+	# Only sane sizes reach the app (the app also enforces its own cap).
+	request_body {
+		max_size 4MB
+	}
+}

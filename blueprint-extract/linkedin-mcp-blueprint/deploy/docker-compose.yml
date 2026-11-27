@@ -1,0 +1,76 @@
+# Staging-style deployment: app + PostgreSQL behind a TLS-terminating proxy.
+# NOT for unattended production use without owner approval (owner D-A3:
+# private-pilot posture). Secrets come from the environment / a secret
+# manager — never committed to the repo.
+#
+# Usage:
+#   docker compose up -d        (from deploy/)
+#   docker compose exec app node dist/scripts/bootstrapAdmin.js  (first-run admin)
+#
+# Required before up:
+#   .env next to this file with TOKEN_VAULT_KEY, LINKEDIN_* etc. (see
+#   deploy/env.staging.example); docker compose substitutes them.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lkm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: linkedin_mcp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lkm -d linkedin_mcp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # Not published to the host: only the app talks to it over the compose network.
+    expose:
+      - "5432"
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: staging
+      HTTP_HOST: 0.0.0.0
+      HTTP_PORT: 3333
+      OAUTH_PROVIDER: linkedin
+      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID:?set in .env}
+      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET:?set in .env}
+      LINKEDIN_REDIRECT_URI: ${LINKEDIN_REDIRECT_URI:?set in .env}
+      DATABASE_URL: postgres://lkm:${POSTGRES_PASSWORD}@db:5432/linkedin_mcp
+      TOKEN_VAULT_KEY: ${TOKEN_VAULT_KEY:?set in .env}
+      AUTH_MODE: session
+      SESSION_TTL_SECONDS: 28800
+      PUBLISH_DAILY_LIMIT: 12
+      PUBLISH_DUPLICATE_WINDOW_MINUTES: 10
+    expose:
+      - "3333"
+    # TLS is terminated by the reverse proxy in front (443 -> app:3333).
+    # Never expose this port directly to the internet.
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

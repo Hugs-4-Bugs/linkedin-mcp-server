@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+coverage
+*.log
+.env
+.env.*
+!deploy/env.staging.example
+deploy/.env

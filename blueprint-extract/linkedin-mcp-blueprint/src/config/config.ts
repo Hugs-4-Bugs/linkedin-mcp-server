@@ -7,7 +7,7 @@
  */
 import * as z from 'zod/v4';
 
-export const ENVIRONMENTS = ['local', 'staging'] as const;
+export const ENVIRONMENTS = ['local', 'staging', 'production'] as const;
 export type Environment = (typeof ENVIRONMENTS)[number];
 
 /** Fixed self-serve scope set (ADR-012, owner decision D-A1). */
@@ -43,6 +43,21 @@ const ConfigSchema = z.object({
   // confirmation requirements — those are code-enforced, not configurable.
   PUBLISH_DAILY_LIMIT: z.coerce.number().int().min(1).max(100).default(12),
   PUBLISH_DUPLICATE_WINDOW_MINUTES: z.coerce.number().int().min(1).max(1440).default(10),
+  // --- M5 persistence + remote authentication (ADR-018/019) ---
+  // DATABASE_URL: postgres://... (staging/prod persistence) or
+  // sqlite:file (local dev persistence). Unset = in-memory (M2–M4 behavior).
+  DATABASE_URL: z.string().min(1).optional(),
+  // Auth mode for the remote HTTP surface: 'session' (real, SQL-backed) or
+  // 'mock' (deterministic tests only — REJECTED in staging/production).
+  AUTH_MODE: z.enum(['session', 'mock']).default('session'),
+  // Session lifetime (seconds), default 8h.
+  SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(86400).default(28800),
+  // HTTP request body cap in MiB (default 1; MCP JSON-RPC is small).
+  MAX_BODY_MIB: z.coerce.number().min(1).max(16).default(1),
+  // Per-IP request rate limit (requests per minute, default 120).
+  HTTP_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(10).max(6000).default(120),
+  // UI cookie name (session).
+  SESSION_COOKIE_NAME: z.string().min(1).default('lkm_session'),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -64,10 +79,41 @@ export function parseConfig(raw: Record<string, string | undefined>): AppConfig 
     throw new ConfigError(result.error.issues);
   }
   const cfg = result.data;
-  // Cross-field rule: local must not bind beyond loopback; staging needs 0.0.0.0 allowed.
+  // Cross-field rule: local must not bind beyond loopback; staging and
+  // production may bind 0.0.0.0 (behind a TLS-terminating proxy).
   if (cfg.ENVIRONMENT === 'local' && !['127.0.0.1', 'localhost', '::1'].includes(cfg.HTTP_HOST)) {
     throw new ConfigError([
       { path: ['HTTP_HOST'], message: `local environment must bind loopback, got ${cfg.HTTP_HOST}` },
+    ] as never);
+  }
+  // --- M5 production fail-fast rules (ADR-019) ---
+  // Production: no mock anything (auth or OAuth provider), persistence REQUIRED.
+  if (cfg.ENVIRONMENT === 'production') {
+    if (cfg.AUTH_MODE === 'mock') {
+      throw new ConfigError([
+        { path: ['AUTH_MODE'], message: 'production rejects mock authentication (fail-fast)' },
+      ] as never);
+    }
+    if (cfg.OAUTH_PROVIDER === 'mock') {
+      throw new ConfigError([
+        { path: ['OAUTH_PROVIDER'], message: 'production rejects the mock OAuth provider (fail-fast)' },
+      ] as never);
+    }
+    if (cfg.DATABASE_URL === undefined) {
+      throw new ConfigError([
+        { path: ['DATABASE_URL'], message: 'production requires persistent storage (fail-fast)' },
+      ] as never);
+    }
+    if (cfg.TOKEN_VAULT_KEY === undefined) {
+      throw new ConfigError([
+        { path: ['TOKEN_VAULT_KEY'], message: 'production requires TOKEN_VAULT_KEY (fail-fast)' },
+      ] as never);
+    }
+  }
+  // Mock auth is tolerated ONLY in local (tests/local HTTP dev).
+  if (cfg.AUTH_MODE === 'mock' && cfg.ENVIRONMENT !== 'local') {
+    throw new ConfigError([
+      { path: ['AUTH_MODE'], message: 'mock authentication is local-only (fail-fast)' },
     ] as never);
   }
   // Real LinkedIn provider requires the full credential triple.

@@ -27,6 +27,7 @@ import { ProviderError } from '../auth/linkedin/provider.js';
 import {
   fingerprintPostText,
   DuplicateOperationError,
+  PostOperationStore,
 } from '../auth/linkedin/postOperationStore.js';
 import {
   reportPostText,
@@ -34,6 +35,8 @@ import {
   POST_TEXT_MAX_LENGTH,
 } from './postValidation.js';
 import { fingerprintPostUrn } from '../auth/linkedin/publishResult.js';
+import type { SqlPostOperationStore } from '../auth/linkedin/sqlPublishStores.js';
+import { SqlPostOperationStore as SqlOpsClass } from '../auth/linkedin/sqlPublishStores.js';
 
 const log = createLogger('tools:publish');
 
@@ -233,22 +236,47 @@ export async function publishPostTool(
     }
     throw err;
   }
-  // 5. Daily publish budget (application safety limit, ADR-015).
-  if (!ctx.publishBudget.take()) {
-    return errorResult(
-      'Daily publication budget exhausted for this account; try again tomorrow.',
-      'rate-limited',
-    );
-  }
-  // 6. Duplicate-content protection (local, ADR-016).
+  // 5/6. Duplicate-content protection + daily budget (ledger local or SQL,
+  // ADR-015/016/018). The memory branch consumes the budget; the SQL branch
+  // uses the transactional SqlPublishBudget.
   const hash = fingerprintPostText(input.text);
-  try {
-    ctx.postOps.enter(ctx.tenant.tenantId, hash);
-  } catch (err) {
-    if (err instanceof DuplicateOperationError) {
-      return errorResult(err.message, `duplicate-${err.reason}`);
+  if (ctx.publishBudgetSql !== undefined || isSqlOps(ctx.postOps)) {
+    // SQL ledger: enter(tenantId, text) computes the hash internally and
+    // prunes expired rows first.
+    try {
+      if (isSqlOps(ctx.postOps)) {
+        await ctx.postOps.enter(ctx.tenant.tenantId, input.text);
+      }
+    } catch (err) {
+      if (err instanceof DuplicateOperationError) {
+        return errorResult(err.message, `duplicate-${err.reason}`);
+      }
+      throw err;
     }
-    throw err;
+    // SQL budget: single transaction-checked take.
+    const sqlBudget = ctx.publishBudgetSql;
+    if (sqlBudget !== undefined && !(await sqlBudget.take(ctx.tenant.tenantId))) {
+      return errorResult(
+        'Daily publication budget exhausted for this account; try again tomorrow.',
+        'rate-limited',
+      );
+    }
+  } else {
+    const memOps: PostOperationStore = ctx.postOps;
+    try {
+      memOps.enter(ctx.tenant.tenantId, hash);
+    } catch (err) {
+      if (err instanceof DuplicateOperationError) {
+        return errorResult(err.message, `duplicate-${err.reason}`);
+      }
+      throw err;
+    }
+    if (!ctx.publishBudget.take()) {
+      return errorResult(
+        'Daily publication budget exhausted for this account; try again tomorrow.',
+        'rate-limited',
+      );
+    }
   }
   // 7. Submit — no automatic retry (ADR-016).
   try {
@@ -257,7 +285,12 @@ export async function publishPostTool(
       memberSub: sub,
       text: input.text,
     });
-    ctx.postOps.exit(ctx.tenant.tenantId, hash, 'success', result.postUrn);
+    if (isSqlOps(ctx.postOps)) {
+      await ctx.postOps.exit(ctx.tenant.tenantId, hash, 'success', result.postUrn);
+    } else {
+      const memOps: PostOperationStore = ctx.postOps;
+      memOps.exit(ctx.tenant.tenantId, hash, 'success', result.postUrn);
+    }
     const payload = {
       published: true,
       confirmedByProvider: true,
@@ -279,7 +312,12 @@ export async function publishPostTool(
       // 4xx = definite refusal (safe to retry by the user later);
       // timeout/network/5xx = ambiguous (may have been accepted).
       const ambiguous = err.code === 'timeout' || err.code === 'network' || (err.code === 'http-status' && (err.status ?? 0) >= 500);
-      ctx.postOps.exit(ctx.tenant.tenantId, hash, ambiguous ? 'ambiguous' : 'failure');
+      if (isSqlOps(ctx.postOps)) {
+        await ctx.postOps.exit(ctx.tenant.tenantId, hash, ambiguous ? 'ambiguous' : 'failure');
+      } else {
+        const memOps: PostOperationStore = ctx.postOps;
+        memOps.exit(ctx.tenant.tenantId, hash, ambiguous ? 'ambiguous' : 'failure');
+      }
       const message =
         err.code === 'timeout'
           ? 'LinkedIn did not respond in time; the post may or may not have been created. Verify on LinkedIn before retrying this exact content.'
@@ -297,8 +335,20 @@ export async function publishPostTool(
     }
     // Non-provider failure: the request never left reliably — treat as
     // ambiguous (ledger conservative) and surface a safe error.
-    ctx.postOps.exit(ctx.tenant.tenantId, hash, 'ambiguous');
+    if (isSqlOps(ctx.postOps)) {
+      await ctx.postOps.exit(ctx.tenant.tenantId, hash, 'ambiguous');
+    } else {
+      const memOps: PostOperationStore = ctx.postOps;
+      memOps.exit(ctx.tenant.tenantId, hash, 'ambiguous');
+    }
     log.error('unexpected publish error', { error: err instanceof Error ? err.message : String(err) });
     return errorResult('Unexpected error during publishing; outcome unknown.', 'ambiguous');
   }
+}
+
+/** Narrow the runtime's op-ledger union to the SQL variant. */
+function isSqlOps(
+  ops: PostOperationStore | SqlPostOperationStore,
+): ops is SqlPostOperationStore {
+  return ops instanceof SqlOpsClass;
 }

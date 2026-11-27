@@ -11,8 +11,22 @@ describe('config validation', () => {
   });
 
   it('rejects an unknown environment', () => {
-    expect(() => parseConfig({ ENVIRONMENT: 'production' })).toThrow(ConfigError);
-    expect(() => parseConfig({ ENVIRONMENT: 'production' })).toThrow(/ENVIRONMENT/);
+    expect(() => parseConfig({ ENVIRONMENT: 'staging-prod' })).toThrow(ConfigError);
+    expect(() => parseConfig({ ENVIRONMENT: 'staging-prod' })).toThrow(/ENVIRONMENT/);
+  });
+
+  it('M5: production environment now valid but fails fast on unsafe composition', () => {
+    // production without persistence, vault key, mock auth or mock OAuth is rejected
+    expect(() => parseConfig({ ENVIRONMENT: 'production', OAUTH_PROVIDER: 'mock' })).toThrow(/mock OAuth provider/);
+    expect(() =>
+      parseConfig({ ENVIRONMENT: 'production', OAUTH_PROVIDER: 'linkedin', LINKEDIN_CLIENT_ID: 'c', LINKEDIN_CLIENT_SECRET: 's', LINKEDIN_REDIRECT_URI: 'https://example.com/cb', AUTH_MODE: 'mock' }),
+    ).toThrow(/mock authentication/);
+    expect(() =>
+      parseConfig({ ENVIRONMENT: 'production', OAUTH_PROVIDER: 'linkedin', LINKEDIN_CLIENT_ID: 'c', LINKEDIN_CLIENT_SECRET: 's', LINKEDIN_REDIRECT_URI: 'https://example.com/cb' }),
+    ).toThrow(/DATABASE_URL/);
+    expect(() =>
+      parseConfig({ ENVIRONMENT: 'production', OAUTH_PROVIDER: 'linkedin', LINKEDIN_CLIENT_ID: 'c', LINKEDIN_CLIENT_SECRET: 's', LINKEDIN_REDIRECT_URI: 'https://example.com/cb', DATABASE_URL: 'postgres://x' }),
+    ).toThrow(/TOKEN_VAULT_KEY/);
   });
 
   it('rejects non-loopback bind in local environment', () => {

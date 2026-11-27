@@ -9,6 +9,7 @@ import type { LinkedInOAuthProvider } from '../auth/linkedin/provider.js';
 import type { TokenBucket } from '../usage/tokenBucket.js';
 import { NoTokenError, type TokenVault } from '../auth/linkedin/tokenVault.js';
 import type { PostOperationStore } from '../auth/linkedin/postOperationStore.js';
+import type { SqlPostOperationStore, SqlPublishBudget } from '../auth/linkedin/sqlPublishStores.js';
 
 export interface ToolContext {
   config: AppConfig;
@@ -20,7 +21,9 @@ export interface ToolContext {
   /** OAuth provider (for provider-backed capabilities like userinfo). */
   provider: LinkedInOAuthProvider;
   /** Publication operation ledger (M4 duplicate/write safety, ADR-016). */
-  postOps: PostOperationStore;
+  postOps: PostOperationStore | SqlPostOperationStore;
+  /** SQL publish budget when persistence is active (ADR-018). */
+  publishBudgetSql?: SqlPublishBudget | undefined;
   /** Daily publication budget for this tenant (app safety limit, ADR-015). */
   publishBudget: TokenBucket;
   /** Time source; injectable for deterministic expiry tests. */

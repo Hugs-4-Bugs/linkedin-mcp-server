@@ -89,9 +89,9 @@ export const CONNECTION_TOOL_SPECS: RegisteredToolSpec[] = [
 ];
 
 /** Connect tool: start flow, return URL + state. No authz gate needed (READ_ONLY policy). */
-export function connectTool(ctx: ToolContext): ToolResult {
+export async function connectTool(ctx: ToolContext): Promise<ToolResult> {
   try {
-    const start = ctx.connection.connect(ctx.tenant);
+    const start = await ctx.connection.connect(ctx.tenant);
     return textResult({
       authorizationUrl: start.authorizationUrl,
       state: start.state,

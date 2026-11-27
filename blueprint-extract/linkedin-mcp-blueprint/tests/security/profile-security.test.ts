@@ -48,7 +48,7 @@ function makeRig(now: () => number = () => Date.now()): Rig {
 
 /** Connect the tenant via the real 3LO service flow (mock provider). */
 async function connect(rig: Rig, scopes: readonly string[] = LINKEDIN_SCOPES): Promise<void> {
-  const start = rig.service.connect(LOCAL_DEV_TENANT);
+  const start = await rig.service.connect(LOCAL_DEV_TENANT);
   const code = rig.provider.issueCode(scopes);
   await rig.service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
 }
@@ -260,7 +260,7 @@ describe('listGrantedScopes tool (§3 truth model)', () => {
   it('unverified when no claim captured; requested never presented as granted', async () => {
     const rig = makeRig();
     // connect with empty claim: mock issueCode with empty scopes
-    const start = rig.service.connect(LOCAL_DEV_TENANT);
+    const start = await rig.service.connect(LOCAL_DEV_TENANT);
     const code = rig.provider.issueCode([]);
     await rig.service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
     const r = await listGrantedScopesTool(rig.ctxFor(LOCAL_DEV_TENANT));

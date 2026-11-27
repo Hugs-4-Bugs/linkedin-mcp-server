@@ -13,6 +13,6 @@
 - [ ] T4.1 Claude compatibility testing
 - [ ] T4.2 ChatGPT compatibility testing
 - [ ] T5.1 Security and integration testing
-- [ ] T6.1 Remote staging deployment
+- [x] T6.1 Remote staging foundation — DONE 2026-11-27 (M5, on develop): SQL persistence (Postgres + SQLite), credential-based remote auth (sessions/CSRF/bearer), authenticated /mcp + OAuth routes, security headers/rate/413, console UI (/admin, real MCP client), deploy/ stack (Dockerfile/compose/Caddy/bootstrapAdmin/healthz/graceful shutdown). LIVE hosting remains owner manual action. Evidence: HANDOFF_M5.md, PROGRESS_TRACKER.md.
 - [ ] T7.1 Production readiness audit
 - [ ] T8.1 Monetization feasibility and design (later)

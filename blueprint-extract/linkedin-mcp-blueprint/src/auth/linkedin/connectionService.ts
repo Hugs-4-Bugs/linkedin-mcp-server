@@ -24,6 +24,16 @@ const log = createLogger('auth:service');
 /** Connect-flow rate limit: 6 attempts / 10 min / tenant (owner D-A8). */
 const CONNECT_RATE = { capacity: 6, windowMs: 600_000 };
 
+/**
+ * State-store seam (M5, ADR-018): the M2 in-memory OAuthStateStore is
+ * synchronous; the SQL-backed store is async. The service speaks this
+ * narrow interface so either backend slots in without touching callers.
+ */
+export interface StateStorePort {
+  create(tenant: TenantContext): string | Promise<string>;
+  consume(state: string, tenant: TenantContext): void | Promise<void>;
+}
+
 export interface ConnectStart {
   authorizationUrl: string;
   /** Opaque flow id so the callback route can correlate without a session. */
@@ -55,7 +65,7 @@ export class CallbackError extends Error {
 }
 
 export class LinkedInConnectionService {
-  private readonly stateStore: OAuthStateStore;
+  private readonly stateStore: StateStorePort;
   private readonly limiter: BucketRegistry;
 
   constructor(
@@ -63,16 +73,20 @@ export class LinkedInConnectionService {
     private readonly provider: LinkedInOAuthProvider,
     private readonly vault: TokenVault,
     private readonly now: () => number = () => Date.now(),
+    stateStore: StateStorePort = new OAuthStateStore(
+      (config.OAUTH_STATE_TTL_SECONDS) * 1000,
+      now,
+    ),
   ) {
-    this.stateStore = new OAuthStateStore(this.config.OAUTH_STATE_TTL_SECONDS * 1000, now);
+    this.stateStore = stateStore;
     this.limiter = new BucketRegistry(CONNECT_RATE, now);
   }
 
-  connect(tenant: TenantContext): ConnectStart {
+  async connect(tenant: TenantContext): Promise<ConnectStart> {
     if (!this.limiter.for(`connect:${tenant.tenantId}/${tenant.userId}`).take()) {
       throw new RateLimitError();
     }
-    const state = this.stateStore.create(tenant);
+    const state = await this.stateStore.create(tenant);
     const authorizationUrl = this.provider.buildAuthorizeUrl({
       clientId: this.clientId(),
       redirectUri: this.config.LINKEDIN_REDIRECT_URI ?? 'http://127.0.0.1/mock-callback',
@@ -89,7 +103,7 @@ export class LinkedInConnectionService {
    */
   async handleCallback(tenant: TenantContext, state: string, code: string): Promise<ConnectionStatusInfo> {
     try {
-      this.stateStore.consume(state, tenant);
+      await this.stateStore.consume(state, tenant);
     } catch (err) {
       if (err instanceof StateStoreError) {
         throw new CallbackError('state', err.message);

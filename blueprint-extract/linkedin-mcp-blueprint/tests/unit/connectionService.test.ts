@@ -23,9 +23,9 @@ function makeService(): { service: LinkedInConnectionService; provider: LinkedIn
 }
 
 describe('connection service (mock provider)', () => {
-  it('connect() returns a LinkedIn-shaped authorization URL with state+scopes', () => {
+  it('connect() returns a LinkedIn-shaped authorization URL with state+scopes', async () => {
     const { service } = makeService();
-    const start = service.connect(LOCAL_DEV_TENANT);
+    const start = await service.connect(LOCAL_DEV_TENANT);
     const url = new URL(start.authorizationUrl);
     expect(url.origin + url.pathname).toBe('https://www.linkedin.com/oauth/v2/authorization');
     expect(url.searchParams.get('state')).toBe(start.state);
@@ -35,7 +35,7 @@ describe('connection service (mock provider)', () => {
 
   it('full happy path: callback seals tokens; status shows connected', async () => {
     const { service, provider } = makeService();
-    const start = service.connect(LOCAL_DEV_TENANT);
+    const start = await service.connect(LOCAL_DEV_TENANT);
     const code = provider.issueCode(LINKEDIN_SCOPES);
     const status = await service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
     expect(status.connected).toBe(true);
@@ -50,7 +50,7 @@ describe('connection service (mock provider)', () => {
 
   it('callback with wrong state is rejected and leaves no tokens', async () => {
     const { service, provider } = makeService();
-    service.connect(LOCAL_DEV_TENANT);
+    await service.connect(LOCAL_DEV_TENANT);
     const code = provider.issueCode(LINKEDIN_SCOPES);
     await expect(
       service.handleCallback(LOCAL_DEV_TENANT, 'forged-state', code),
@@ -60,7 +60,7 @@ describe('connection service (mock provider)', () => {
 
   it('callback state is single-use: replay fails even with a fresh code', async () => {
     const { service, provider } = makeService();
-    const start = service.connect(LOCAL_DEV_TENANT);
+    const start = await service.connect(LOCAL_DEV_TENANT);
     const code = provider.issueCode(LINKEDIN_SCOPES);
     await service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
     const code2 = provider.issueCode(LINKEDIN_SCOPES);
@@ -71,10 +71,10 @@ describe('connection service (mock provider)', () => {
 
   it('mock codes are single-use: exchanging twice fails', async () => {
     const { service, provider } = makeService();
-    const start = service.connect(LOCAL_DEV_TENANT);
+    const start = await service.connect(LOCAL_DEV_TENANT);
     const code = provider.issueCode(LINKEDIN_SCOPES);
     await service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
-    const start2 = service.connect(LOCAL_DEV_TENANT);
+    const start2 = await service.connect(LOCAL_DEV_TENANT);
     await expect(
       service.handleCallback(LOCAL_DEV_TENANT, start2.state, code),
     ).rejects.toThrow(/invalid-grant|unknown or already-used/);
@@ -82,7 +82,7 @@ describe('connection service (mock provider)', () => {
 
   it('disconnect deletes tokens; status then disconnected', async () => {
     const { service, provider } = makeService();
-    const start = service.connect(LOCAL_DEV_TENANT);
+    const start = await service.connect(LOCAL_DEV_TENANT);
     const code = provider.issueCode(LINKEDIN_SCOPES);
     await service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
     expect(await service.disconnect(LOCAL_DEV_TENANT)).toBe(true);
@@ -99,7 +99,7 @@ describe('connection service (mock provider)', () => {
       vault,
       () => clock,
     );
-    const start = service.connect(LOCAL_DEV_TENANT);
+    const start = await service.connect(LOCAL_DEV_TENANT);
     const code = provider.issueCode(LINKEDIN_SCOPES);
     await service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
     clock = Date.now() + 61 * 24 * 3600 * 1000; // 61 days later
@@ -107,17 +107,17 @@ describe('connection service (mock provider)', () => {
     expect((await service.status(LOCAL_DEV_TENANT)).expiresAt).toBeNull();
   });
 
-  it('connect is rate-limited (6 per 10 minutes per tenant)', () => {
+  it('connect is rate-limited (6 per 10 minutes per tenant)', async () => {
     const { service } = makeService();
-    for (let i = 0; i < 6; i++) service.connect(LOCAL_DEV_TENANT);
-    expect(() => service.connect(LOCAL_DEV_TENANT)).toThrow(RateLimitError);
+    for (let i = 0; i < 6; i++) await service.connect(LOCAL_DEV_TENANT);
+    await expect(service.connect(LOCAL_DEV_TENANT)).rejects.toThrow(RateLimitError);
   });
 
-  it('rate limit is per tenant, not global', () => {
+  it('rate limit is per tenant, not global', async () => {
     const { service } = makeService();
     const other = { tenantId: 'other', userId: 'u' };
-    for (let i = 0; i < 6; i++) service.connect(LOCAL_DEV_TENANT);
-    expect(() => service.connect(other)).not.toThrow();
+    for (let i = 0; i < 6; i++) await service.connect(LOCAL_DEV_TENANT);
+    await expect(service.connect(other)).resolves.toBeTruthy();
   });
 });
 

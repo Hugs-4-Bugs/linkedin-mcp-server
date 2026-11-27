@@ -39,7 +39,7 @@ describe('oauth secret hygiene', () => {
     const vault = new InMemoryTokenVault(generateVaultKey());
     const service = new LinkedInConnectionService(config, provider, vault);
 
-    const start = service.connect(LOCAL_DEV_TENANT);
+    const start = await service.connect(LOCAL_DEV_TENANT);
     const code = provider.issueCode(LINKEDIN_SCOPES);
     const status = await service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
 
@@ -60,7 +60,7 @@ describe('oauth secret hygiene', () => {
     const vault = new InMemoryTokenVault(generateVaultKey());
     // wire the service's logger to the capturing sink by module-level logger
     const service = new LinkedInConnectionService(config, provider, vault);
-    const start = service.connect(LOCAL_DEV_TENANT);
+    const start = await service.connect(LOCAL_DEV_TENANT);
     const code = provider.issueCode(LINKEDIN_SCOPES);
     await service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
     // module loggers write to stderr by default; capture via createLogger with sink

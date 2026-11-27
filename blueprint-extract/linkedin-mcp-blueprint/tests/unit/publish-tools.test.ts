@@ -70,7 +70,7 @@ function makeRig(
 }
 
 async function connect(rig: Rig, scopes: readonly string[] = LINKEDIN_SCOPES): Promise<void> {
-  const start = rig.service.connect(LOCAL_DEV_TENANT);
+  const start = await rig.service.connect(LOCAL_DEV_TENANT);
   const code = rig.provider.issueCode(scopes);
   await rig.service.handleCallback(LOCAL_DEV_TENANT, start.state, code);
 }

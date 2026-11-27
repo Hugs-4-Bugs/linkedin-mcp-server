@@ -1,6 +1,6 @@
 # Current State
 
-**2026-11-27 — MILESTONE 4 (LinkedIn publishing end-to-end, mock/injected-fetch driven) COMPLETE & VERIFIED. Next: Milestone 5 (remote staging) — NOT started, awaiting owner.**
+**2026-11-27 — MILESTONE 5 (remote security, persistent storage, console UI, deployment foundation) COMPLETE & VERIFIED on branch `develop` (pushed to origin/develop; main untouched). Next: Milestone 6 (client compatibility) — NOT started, awaiting owner.**
 
 ## Phase 0 → approval → M1 → gate → M2 timeline
 
@@ -34,6 +34,17 @@
 - **memberSub persisted** in TokenSet at callback; status surfaces it; publish refuses `identity-unresolved` while sub is pending (real provider until live userinfo).
 - **Suite 165/165, 16 files** (+56 M4: 33 tool behavior incl. real-provider request shape via injected fetch, 17 security matrix, 6 HTTP E2E full flow). typecheck/lint/build/audit 0/0/scan clean; pinned deps unchanged; ADR-015/016/017 recorded.
 - **LIVE publishing NOT performed** (no credentials — owner-gated since M2). The `urn:li:person:{sub}` author mapping is community-verified, not officially documented — flagged for live confirmation. Stopped at M4 boundary; no M5 work started.
+
+## M5 (2026-11-27) — persistence, remote auth, console, deploy foundation (branch develop)
+
+- **Repo**: remote = github.com/Hugs-4-Bugs/linkedin-mcp-server; M1–M4 history pushed to `origin/develop` BEFORE M5 work (merge 8212a5a; unrelated remote initial commit preserved non-destructively). `main` untouched at 85e6683. PAT used via temp GIT_ASKPASS only.
+- **Persistence (ADR-018)**: `SqlExecutor` seam — Postgres (`pg@8.16.0`, only new dep) + SQLite (node:sqlite). Idempotent migrations at startup. SQL stores behind the SAME M2–M4 contracts: vault (AES-256-GCM ciphertext only), state store (atomic single-use), publish ledger + budget (transactional, survive restart). `DATABASE_URL` unset → exact in-memory M4 behavior (166 regression tests prove it).
+- **Remote auth (ADR-019)**: scrypt users, digest-at-rest sessions + CSRF, bearer API tokens, audit log; tenant from credentials via AsyncLocalStorage (never caller headers); production fail-fast rejects mock auth/OAuth + requires persistence + vault key. Two real bugs found by our E2E (SDK ALS scope escape; OAuth-route tenant-key split) — both fixed.
+- **Remote MCP security**: security headers (CSP default-src 'none'), per-IP rate limit, 413 cap, 401 on /mcp + OAuth routes in persistence mode, bounded redirects, graceful shutdown, /healthz.
+- **Console (ADR-020)**: `/admin` self-contained CSP-safe page speaking the real MCP protocol; publish uses the same confirm:true gate (UI cannot bypass).
+- **Deploy foundation**: deploy/ = Dockerfile (non-root), compose (app+Postgres17+Caddy TLS), env templates, bootstrapAdmin, runbook. NOT deployed live (owner manual action; see HANDOFF_M5 §7).
+- **Suite 212/212 (18 files)**: +25 DB integration, +21 remote-security E2E, +1 config fail-fast; all M1–M4 green (7 tests updated for genuinely-async connect()). lint 0 · audit 0/0 · scan clean.
+- **Known limits**: no live deployment/Postgres/TLS/LinkedIn credentials yet; SQLite single-process; no migrate:rollback.
 
 ## M1 facts (verified)
 
