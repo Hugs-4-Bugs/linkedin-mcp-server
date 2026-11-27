@@ -114,11 +114,6 @@ export const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_audit_tenant_time ON audit_log(tenant_id, created_at DESC)`,
     ],
     sqlite: [
-      `CREATE TABLE IF NOT EXISTS schema_migrations (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`,
       `CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
@@ -196,6 +191,85 @@ export const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_ops_tenant ON publish_operations(tenant_id)`,
       `CREATE INDEX IF NOT EXISTS idx_api_tokens ON api_tokens(tenant_id)`,
       `CREATE INDEX IF NOT EXISTS idx_audit_tenant_time ON audit_log(tenant_id, created_at DESC)`,
+    ],
+  },
+  {
+    // M9 (issues #13/#14): billing tables. webhook_events.event_id is the
+    // replay/duplicate boundary (unique constraint); entitlements +
+    // usage_counters are tenant-scoped like every other tenant-owned table.
+    id: 2,
+    name: 'billing tables',
+    postgres: [
+      `CREATE TABLE IF NOT EXISTS webhook_events (
+        event_id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        subscription_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        occurred_at TIMESTAMPTZ NOT NULL
+      )`,
+      `CREATE TABLE IF NOT EXISTS subscriptions (
+        tenant_id TEXT PRIMARY KEY,
+        subscription_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL,
+        provider_status TEXT NOT NULL,
+        entitlement_status TEXT NOT NULL,
+        grace_ends_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS entitlements (
+        tenant_id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        grace_ends_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      `CREATE TABLE IF NOT EXISTS usage_counters (
+        tenant_id TEXT NOT NULL,
+        counter TEXT NOT NULL,
+        window_ms BIGINT NOT NULL,
+        hits TEXT NOT NULL DEFAULT '[]',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (tenant_id, counter)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_events_tenant ON webhook_events(tenant_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant ON subscriptions(tenant_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_usage_counters_tenant ON usage_counters(tenant_id)`,
+    ],
+    sqlite: [
+      `CREATE TABLE IF NOT EXISTS webhook_events (
+        event_id TEXT PRIMARY KEY,
+        code TEXT NOT NULL,
+        subscription_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+      )`,
+      `CREATE TABLE IF NOT EXISTS subscriptions (
+        tenant_id TEXT PRIMARY KEY,
+        subscription_id TEXT NOT NULL,
+        plan_id TEXT NOT NULL,
+        provider_status TEXT NOT NULL,
+        entitlement_status TEXT NOT NULL,
+        grace_ends_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS entitlements (
+        tenant_id TEXT PRIMARY KEY,
+        plan_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        grace_ends_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS usage_counters (
+        tenant_id TEXT NOT NULL,
+        counter TEXT NOT NULL,
+        window_ms BIGINT NOT NULL,
+        hits TEXT NOT NULL DEFAULT '[]',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (tenant_id, counter)
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_webhook_events_tenant ON webhook_events(tenant_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant ON subscriptions(tenant_id)`,
+      `CREATE INDEX IF NOT EXISTS idx_usage_counters_tenant ON usage_counters(tenant_id)`,
     ],
   },
 ];

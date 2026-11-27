@@ -63,6 +63,19 @@ const ConfigSchema = z.object({
   HTTP_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(10).max(6000).default(120),
   // UI cookie name (session).
   SESSION_COOKIE_NAME: z.string().min(1).default('lkm_session'),
+  // --- M9 hosted billing (issues #13/#14) ---
+  // Billing is OFF by default: self-hosted installs never touch hosted
+  // payment, billing APIs or entitlement services (issue #14 constraint).
+  // Enabling requires hosted persistence (DATABASE_URL) + a webhook secret
+  // (fail-closed cross-field rule below) — test-mode only (ADR-024).
+  BILLING_ENABLED: z.coerce.boolean().default(false),
+  // Razorpay webhook secret (dashboard-configured; test mode in staging).
+  // Secret material: never logged (billing logger redaction is test-covered).
+  RAZORPAY_WEBHOOK_SECRET: z.string().min(16).optional(),
+  // Plan limits: planId -> monthly tool-call allowance (hosted tiers).
+  BILLING_PLAN_LIMITS: z.string().default('{"pro":500,"team":5000}'),
+  // Entitlement read-cache TTL seconds (bounded staleness; purge-on-write).
+  BILLING_CACHE_TTL_SECONDS: z.coerce.number().int().min(5).max(600).default(60),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
@@ -120,6 +133,21 @@ export function parseConfig(raw: Record<string, string | undefined>): AppConfig 
     throw new ConfigError([
       { path: ['AUTH_MODE'], message: 'mock authentication is local-only (fail-fast)' },
     ] as never);
+  }
+  // --- M9 billing fail-closed cross-field rules (issues #13/#14) ---
+  // Enabling billing without hosted persistence or a webhook secret is a
+  // misconfiguration: reject at startup instead of failing per-request.
+  if (cfg.BILLING_ENABLED) {
+    if (cfg.DATABASE_URL === undefined) {
+      throw new ConfigError([
+        { path: ['BILLING_ENABLED'], message: 'billing requires hosted persistence (DATABASE_URL, fail-closed)' },
+      ] as never);
+    }
+    if (cfg.RAZORPAY_WEBHOOK_SECRET === undefined) {
+      throw new ConfigError([
+        { path: ['RAZORPAY_WEBHOOK_SECRET'], message: 'billing requires RAZORPAY_WEBHOOK_SECRET (fail-closed)' },
+      ] as never);
+    }
   }
   // Real LinkedIn provider requires the full credential triple.
   if (cfg.OAUTH_PROVIDER === 'linkedin') {
