@@ -1,0 +1,20 @@
+linkedin-mcp-server
+Copyright (C) 2026 Hugs-4-Bugs
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version. See LICENSE for the full text.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+or FITNESS FOR A PARTICULAR PURPOSE. See section 15-16 of the LICENSE.
+
+Third-party components (runtime): @modelcontextprotocol/server (MIT),
+pg (MIT), zod (MIT). Build/test tooling and their transitive dependencies
+are MIT/Apache-2.0/ISC/BSD-2-Clause/BSD-3-Clause/BlueOak-1.0.0/MPL-2.0
+licensed; MPL-2.0-covered components remain under MPL-2.0 and their
+source remains available from their upstream projects. A full census is
+enforced by tests/security/release-checklist.test.ts (AGPL-compatible set).
+
+Contact: <https://github.com/Hugs-4-Bugs/linkedin-mcp-server>

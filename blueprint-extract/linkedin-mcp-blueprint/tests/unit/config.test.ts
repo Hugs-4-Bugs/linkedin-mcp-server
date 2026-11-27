@@ -5,7 +5,7 @@ describe('config validation', () => {
   it('accepts a minimal local env with defaults', () => {
     const cfg = parseConfig({ ENVIRONMENT: 'local' });
     expect(cfg.SERVER_NAME).toBe('linkedin-mcp-server');
-    expect(cfg.SERVER_VERSION).toBe('0.1.0');
+    expect(cfg.SERVER_VERSION).toBe('0.8.0'); // bumped at M8 release engineering (issue #15)
     expect(cfg.HTTP_HOST).toBe('127.0.0.1');
     expect(cfg.HTTP_PORT).toBe(3333);
   });

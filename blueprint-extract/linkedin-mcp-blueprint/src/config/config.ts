@@ -19,7 +19,7 @@ const ConfigSchema = z.object({
   SERVER_VERSION: z
     .string()
     .regex(/^\d+\.\d+\.\d+$/, 'SERVER_VERSION must be semver')
-    .default('0.1.0'),
+    .default('0.8.0'),
   HTTP_HOST: z.string().default('127.0.0.1'),
   HTTP_PORT: z.coerce.number().int().min(1).max(65535).default(3333),
   // M2 OAuth provider selection: 'mock' (default in local) or 'linkedin' (real 3LO).
