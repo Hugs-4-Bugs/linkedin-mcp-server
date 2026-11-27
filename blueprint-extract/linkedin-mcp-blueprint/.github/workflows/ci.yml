@@ -1,0 +1,33 @@
+# CI (M8, issue #15): quality gates mirroring CONTRIBUTING.md — the
+# same commands a human runs locally. Runs on PRs and develop pushes.
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: lint
+        run: npm run lint
+      - name: build
+        run: npm run build
+      - name: tests
+        run: npx vitest run
+      - name: audit (prod)
+        run: npm audit --omit=dev
+      - name: secret scan
+        run: bash scripts/secret-scan.sh

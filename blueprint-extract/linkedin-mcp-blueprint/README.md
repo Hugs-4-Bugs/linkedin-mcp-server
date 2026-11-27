@@ -20,3 +20,16 @@ This repository is a planning, specification, and agent-operating package for bu
 
 ## Important limitation
 LinkedIn API availability, permissions, partner program approval, and allowed use are controlled by LinkedIn. The product must not simulate access to unavailable endpoints or use scraping/session-cookie/bypass techniques.
+
+## License and contribution (M8)
+
+This project is licensed under **AGPL-3.0-or-later** — see
+[LICENSE](LICENSE) and [NOTICE](NOTICE). A hosted instance of a modified
+version must offer Corresponding Source to its network users (AGPL §13);
+the release checklist tracks that obligation.
+
+- Contributions: [CONTRIBUTING.md](CONTRIBUTING.md) (gates, DCO sign-off).
+- Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- Security reporting: [03_SECURITY/SECURITY_POLICY.md](03_SECURITY/SECURITY_POLICY.md).
+- Data handling: [03_SECURITY/DATA_PRIVACY.md](03_SECURITY/DATA_PRIVACY.md).
+- Releases: [CHANGELOG.md](CHANGELOG.md) and [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
