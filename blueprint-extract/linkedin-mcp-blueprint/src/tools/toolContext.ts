@@ -8,6 +8,7 @@ import type { LinkedInConnectionService } from '../auth/linkedin/connectionServi
 import type { LinkedInOAuthProvider } from '../auth/linkedin/provider.js';
 import type { TokenBucket } from '../usage/tokenBucket.js';
 import { NoTokenError, type TokenVault } from '../auth/linkedin/tokenVault.js';
+import type { PostOperationStore } from '../auth/linkedin/postOperationStore.js';
 
 export interface ToolContext {
   config: AppConfig;
@@ -18,6 +19,10 @@ export interface ToolContext {
   vault: TokenVault;
   /** OAuth provider (for provider-backed capabilities like userinfo). */
   provider: LinkedInOAuthProvider;
+  /** Publication operation ledger (M4 duplicate/write safety, ADR-016). */
+  postOps: PostOperationStore;
+  /** Daily publication budget for this tenant (app safety limit, ADR-015). */
+  publishBudget: TokenBucket;
   /** Time source; injectable for deterministic expiry tests. */
   now: () => number;
 }

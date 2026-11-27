@@ -7,7 +7,7 @@
 - [ ] Tool schemas and size limits
 - [ ] Authorization and scopes per tool
 - [ ] Side-effect confirmation and idempotency review
-- [ ] Rate limits and timeout controls
+- [x] Rate limits and timeout controls — M2 connect rate limit + M4 publish budget/duplicate window (app-level; LinkedIn publishes no numeric quota — ADR-015); userinfo 10 s + publish 30 s AbortController timeouts
 - [ ] SSRF controls for any URL handling
 - [ ] Prompt injection test fixtures
 - [ ] Dependency and secret scans

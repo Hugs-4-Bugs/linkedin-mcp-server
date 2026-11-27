@@ -20,6 +20,7 @@ import { InMemoryTokenVault, generateVaultKey } from '../auth/linkedin/tokenVaul
 import { LinkedInMockProvider } from '../auth/linkedin/mockProvider.js';
 import { LinkedInRealProvider } from '../auth/linkedin/realProvider.js';
 import type { LinkedInOAuthProvider } from '../auth/linkedin/provider.js';
+import { PostOperationStore } from '../auth/linkedin/postOperationStore.js';
 import type { ToolContext } from '../tools/toolContext.js';
 import {
   CONNECTION_TOOL_SPECS,
@@ -33,6 +34,17 @@ import {
   getMyProfileTool,
   listGrantedScopesTool,
 } from '../tools/profileTools.js';
+import {
+  DRAFT_TOOL_SPEC,
+  PREVIEW_TOOL_SPEC,
+  PUBLISH_TOOL_SPEC,
+  DraftPostInputSchema,
+  PreviewPostInputSchema,
+  PublishPostInputSchema,
+  draftPostTool,
+  previewPostTool,
+  publishPostTool,
+} from '../tools/publishTools.js';
 
 const log = createLogger('mcp:server');
 
@@ -58,6 +70,10 @@ export interface AppRuntime {
   provider: LinkedInOAuthProvider;
   /** Present only when OAUTH_PROVIDER=mock (route-level mock consent flow). */
   mockProvider: LinkedInMockProvider | undefined;
+  /** Publication operation ledger (M4, ADR-016). */
+  postOps: PostOperationStore;
+  /** Per-tenant daily publish budget (application safety limit, ADR-015). */
+  publishBudgets: BucketRegistry;
 }
 
 /**
@@ -84,6 +100,10 @@ export function buildRuntime(config: AppConfig): AppRuntime {
     callBudgets: new BucketRegistry({ capacity: 60, windowMs: 86_400_000 }), // LinkedIn share ceiling shape
     provider,
     mockProvider: config.OAUTH_PROVIDER === 'mock' ? (provider as LinkedInMockProvider) : undefined,
+    postOps: new PostOperationStore({
+      duplicateWindowMs: config.PUBLISH_DUPLICATE_WINDOW_MINUTES * 60_000,
+    }),
+    publishBudgets: new BucketRegistry({ capacity: config.PUBLISH_DAILY_LIMIT, windowMs: 86_400_000 }),
   } satisfies AppRuntime;
 }
 
@@ -95,6 +115,8 @@ function toolContext(runtime: AppRuntime): ToolContext {
     callBudget: runtime.callBudgets.for(`linkedin-calls:${runtime.tenant.tenantId}`),
     vault: runtime.vault,
     provider: runtime.provider,
+    postOps: runtime.postOps,
+    publishBudget: runtime.publishBudgets.for(`publish:${runtime.tenant.tenantId}`),
     now: () => Date.now(),
   };
 }
@@ -190,6 +212,56 @@ function registerProfileTools(server: McpServer, runtime: AppRuntime): void {
   );
 }
 
+/**
+ * Register the M4 publishing tools. draft/preview are local-only (no
+ * provider call, no connection requirement). publish is the ONLY
+ * side-effecting LinkedIn tool in the catalog: its schema forces
+ * confirm:true (the confirmation gate is structural — anything else is
+ * rejected by schema validation before any code runs), it re-checks
+ * connection/expiry/scopes at runtime through authorize(), sources the
+ * author from the sealed token's memberSub, applies the duplicate window
+ * and the daily budget, and never auto-retries an uncertain write.
+ */
+function registerPublishTools(server: McpServer, runtime: AppRuntime): void {
+  const ctx = toolContext(runtime);
+  server.registerTool(
+    DRAFT_TOOL_SPEC.name,
+    {
+      title: DRAFT_TOOL_SPEC.title,
+      description: DRAFT_TOOL_SPEC.description,
+      inputSchema: DRAFT_TOOL_SPEC.inputSchema,
+    },
+    (args: unknown) => {
+      const r = draftPostTool(ctx, DraftPostInputSchema.parse(args ?? {}));
+      return Promise.resolve(r as unknown as { content: { type: 'text'; text: string }[] });
+    },
+  );
+  server.registerTool(
+    PREVIEW_TOOL_SPEC.name,
+    {
+      title: PREVIEW_TOOL_SPEC.title,
+      description: PREVIEW_TOOL_SPEC.description,
+      inputSchema: PREVIEW_TOOL_SPEC.inputSchema,
+    },
+    async (args: unknown) => {
+      const r = await previewPostTool(ctx, PreviewPostInputSchema.parse(args ?? {}));
+      return r as unknown as { content: { type: 'text'; text: string }[] };
+    },
+  );
+  server.registerTool(
+    PUBLISH_TOOL_SPEC.name,
+    {
+      title: PUBLISH_TOOL_SPEC.title,
+      description: PUBLISH_TOOL_SPEC.description,
+      inputSchema: PUBLISH_TOOL_SPEC.inputSchema,
+    },
+    async (args: unknown) => {
+      const r = await publishPostTool(ctx, PublishPostInputSchema.parse(args ?? {}));
+      return r as unknown as { content: { type: 'text'; text: string }[] };
+    },
+  );
+}
+
 export function createMcpServer(runtime: AppRuntime): McpServer {
   const server = new McpServer({
     name: runtime.config.SERVER_NAME,
@@ -201,5 +273,6 @@ export function createMcpServer(runtime: AppRuntime): McpServer {
   registerStatusTool(server, runtime);
   registerConnectionTools(server, runtime);
   registerProfileTools(server, runtime);
+  registerPublishTools(server, runtime);
   return server;
 }

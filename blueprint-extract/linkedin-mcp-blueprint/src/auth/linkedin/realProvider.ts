@@ -5,26 +5,42 @@
  */
 import {
   LINKEDIN_AUTHORIZATION_ENDPOINT,
+  LINKEDIN_POSTS_ENDPOINT,
   LINKEDIN_TOKEN_ENDPOINT,
   LINKEDIN_USERINFO_ENDPOINT,
   ProviderError,
   type AuthorizeUrlInput,
   type LinkedInOAuthProvider,
   type OAuthResult,
+  type PublishInput,
   type TokenExchangeInput,
   type UserInfoInput,
   type UserInfoResponse,
 } from './provider.js';
 import type { TokenSet } from './tokenVault.js';
 import { validateUserInfo, UserinfoValidationError } from './userinfoSchema.js';
+import {
+  validatePublishResult,
+  PublishResultValidationError,
+  type PublishResult,
+} from './publishResult.js';
 
 /** Default provider call timeout (ms). 401/403 from userinfo = revocation. */
 export const USERINFO_TIMEOUT_MS = 10_000;
+/** Default publication timeout (ms). Writes get a longer budget than reads. */
+export const PUBLISH_TIMEOUT_MS = 30_000;
+/**
+ * Linkedin-Version header (YYYYMM). Pinned to the current documented
+ * version at M4 time; retirement is a deliberate change (see ADR-015).
+ * 202601 sunsets 2027-01-15 per the deprecation notice on the docs page.
+ */
+export const LINKEDIN_API_VERSION = '202611';
 
 export class LinkedInRealProvider implements LinkedInOAuthProvider {
   constructor(
     private readonly fetchImpl: typeof fetch = globalThis.fetch,
     private readonly userinfoTimeoutMs: number = USERINFO_TIMEOUT_MS,
+    private readonly publishTimeoutMs: number = PUBLISH_TIMEOUT_MS,
   ) {}
 
   buildAuthorizeUrl(input: AuthorizeUrlInput): string {
@@ -139,5 +155,83 @@ export class LinkedInRealProvider implements LinkedInOAuthProvider {
       }
       throw err;
     }
+  }
+
+  /**
+   * Publish a text-only member post via POST /rest/posts (verified contract,
+   * M4 Phase 2): required headers X-Restli-Protocol-Version 2.0.0 and
+   * Linkedin-Version YYYYMM; author is urn:li:person:{sub} derived from the
+   * authenticated identity, NEVER caller-supplied; success = 201 with the
+   * post URN in x-restli-id. No automatic retry at this layer — a write
+   * whose outcome is uncertain must surface as ambiguous, not be retried
+   * (duplicate-post risk; ADR-016). 4xx is a definite refusal; 5xx, timeout
+   * and network failure after send are ambiguous outcomes.
+   */
+  async publishPost(input: PublishInput): Promise<PublishResult> {
+    // Request body exactly per the documented schema for a text-only post.
+    const body = JSON.stringify({
+      author: `urn:li:person:${input.memberSub}`,
+      commentary: input.text,
+      visibility: 'PUBLIC',
+      distribution: {
+        feedDistribution: 'MAIN_FEED',
+        targetEntities: [],
+        thirdPartyDistributionChannels: [],
+      },
+      lifecycleState: 'PUBLISHED',
+      isReshareDisabledByAuthor: false,
+    });
+    let resp: Response;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      controller.abort();
+    }, this.publishTimeoutMs);
+    try {
+      resp = await this.fetchImpl(LINKEDIN_POSTS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${input.accessToken}`,
+          'x-restli-protocol-version': '2.0.0',
+          'linkedin-version': LINKEDIN_API_VERSION,
+          'content-type': 'application/json',
+        },
+        body,
+        signal: controller.signal,
+      });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // Timed out AFTER the request was sent: LinkedIn may have accepted
+        // the post. This is the canonical ambiguous outcome.
+        throw new ProviderError('timeout', 'posts endpoint timed out (outcome unknown)');
+      }
+      // Network failure mid-flight: the request may or may not have landed.
+      throw new ProviderError(
+        'network',
+        `posts endpoint unreachable: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      clearTimeout(timer); // eslint no-confusing-void: expression statement
+    }
+    // Read the URN from x-restli-id only; bodies are never echoed.
+    const postUrn = resp.headers.get('x-restli-id') ?? undefined;
+    if (resp.status === 201) {
+      try {
+        return validatePublishResult({ confirmed: true, postUrn, status: 201 });
+      } catch (err) {
+        if (err instanceof PublishResultValidationError) {
+          throw new ProviderError('invalid-response', 'post creation response lacked a valid x-restli-id URN');
+        }
+        throw err;
+      }
+    }
+    if (resp.status >= 400 && resp.status < 500) {
+      // Definite refusal (400/401/403/409/422/429): no post was created.
+      // 422 includes the documented exact-duplicate response; 429 is the
+      // documented rate-limit response. Body never surfaces.
+      throw new ProviderError('write-rejected', `posts endpoint refused the write (${String(resp.status)})`, resp.status);
+    }
+    // 5xx: LinkedIn did not confirm — but a gateway timeout on their side
+    // may still have committed the write. Ambiguous, surfaced as such.
+    throw new ProviderError('http-status', `posts endpoint returned ${String(resp.status)} (outcome unknown)`, resp.status);
   }
 }

@@ -19,6 +19,13 @@ export interface TokenSet {
   /** Unix epoch ms when the token expires (LinkedIn: 60 days). */
   expiresAt: number;
   scopes: readonly string[];
+  /**
+   * Authenticated member's OIDC sub (M4): the identity that authorship is
+   * bound to. Mock provider resolves it at exchange; the real provider
+   * marks it 'pending' until a live userinfo call confirms the sub — tools
+   * must refuse writes that need a definite author while it is unresolved.
+   */
+  memberSub?: string;
 }
 
 export class VaultKeyError extends Error {

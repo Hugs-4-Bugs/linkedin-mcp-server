@@ -34,6 +34,9 @@ describe('stdio transport E2E (child process)', () => {
       'linkedin_disconnect',
       'linkedin_get_my_profile',
       'linkedin_list_granted_scopes',
+      'linkedin_draft_post',
+      'linkedin_preview_post',
+      'linkedin_publish_post',
     ]);
   });
 

@@ -106,6 +106,7 @@ export class LinkedInConnectionService {
       accessToken: result.accessToken,
       expiresAt: result.expiresAt,
       scopes: result.scopes,
+      memberSub: result.memberId,
     });
     log.info('callback accepted; tokens sealed', { tenant: tenant.tenantId, scopes: result.scopes.join(' ') });
     return {
@@ -133,7 +134,7 @@ export class LinkedInConnectionService {
       connected: !expired,
       expiresAt: expired ? null : tokens.expiresAt,
       scopes: tokens.scopes,
-      memberId: expired ? null : null,
+      memberId: expired ? null : tokens.memberSub ?? null,
     };
   }
 

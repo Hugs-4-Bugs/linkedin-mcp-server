@@ -2,20 +2,31 @@
  * LinkedIn OAuth provider contract (the M2 seam between our service layer
  * and LinkedIn's real 3LO endpoints vs the mock used in tests/local).
  *
- * Real endpoints (Phase 0 research, Microsoft Learn "Sign In with LinkedIn
- * using OpenID Connect" + docs for Share on LinkedIn):
+ * Real endpoints (verified against Microsoft Learn, M4 Phase 2 re-check:
+ * "Sign In with LinkedIn using OpenID Connect", "Posts API", "UGC Post API"):
  *  - authorize: https://www.linkedin.com/oauth/v2/authorization
  *  - token:     https://www.linkedin.com/oauth/v2/accessToken
- *  - userinfo: https://api.linkedin.com/v2/userinfo (OIDC)
+ *  - userinfo:  https://api.linkedin.com/v2/userinfo (OIDC)
+ *  - posts:     https://api.linkedin.com/rest/posts (Posts API; w_member_social,
+ *               headers X-Restli-Protocol-Version 2.0.0 + Linkedin-Version
+ *               YYYYMM; 201 with the post URN in the x-restli-id header)
  * Scopes are the fixed self-serve set (ADR-012). Access tokens last 60 days;
  * refresh tokens are partner-only, so expiry handling is explicit.
+ *
+ * Rate limits (M4 Phase 2 finding): LinkedIn publishes NO numeric per-member
+ * or per-app quota in documentation; actual limits are surfaced per-app in
+ * the Developer Portal Analytics. The earlier "150 req/member/day" note was
+ * community folklore, not documentation — it is therefore an application
+ * safety limit, never a claimed LinkedIn quota (ADR-015).
  */
 import type { TokenSet } from './tokenVault.js';
+import type { PublishResult } from './publishResult.js';
 
 export const LINKEDIN_AUTHORIZATION_ENDPOINT =
   'https://www.linkedin.com/oauth/v2/authorization';
 export const LINKEDIN_TOKEN_ENDPOINT = 'https://www.linkedin.com/oauth/v2/accessToken';
 export const LINKEDIN_USERINFO_ENDPOINT = 'https://api.linkedin.com/v2/userinfo';
+export const LINKEDIN_POSTS_ENDPOINT = 'https://api.linkedin.com/rest/posts';
 
 export interface AuthorizeUrlInput {
   clientId: string;
@@ -74,6 +85,27 @@ export interface LinkedInOAuthProvider {
    * never leak into logs or errors.
    */
   getUserInfo(input: UserInfoInput): Promise<UserInfoResponse>;
+  /**
+   * Publish a text-only post to the authenticated member's feed via the
+   * Posts API (POST /rest/posts). The author is the identity bound to the
+   * sealed access token — callers never supply an author URN. Returns the
+   * verified outcome: confirmed (201 + x-restli-id URN), refused (4xx), or
+   * ambiguous (timeout/network/5xx — the provider could not determine
+   * whether LinkedIn accepted it). Throws ProviderError only for transport
+   * classification; response bodies never leak into logs or errors.
+   */
+  publishPost(input: PublishInput): Promise<PublishResult>;
+}
+
+export interface PublishInput {
+  /** Sealed access token for the connected tenant. */
+  accessToken: string;
+  /** Member sub (OIDC subject) — becomes urn:li:person:{sub} as author. */
+  memberSub: string;
+  /** Already-validated post text (validatePostText ran at the tool layer). */
+  text: string;
+  /** Injectable clock for deterministic mock/TTL behavior. */
+  now?: () => number;
 }
 
 export type ProviderErrorCode =
@@ -81,7 +113,9 @@ export type ProviderErrorCode =
   | 'network'
   | 'invalid-response'
   | 'http-status'
-  | 'timeout';
+  | 'timeout'
+  /** Write refused by the provider before/at submission (4xx). */
+  | 'write-rejected';
 
 export class ProviderError extends Error {
   constructor(

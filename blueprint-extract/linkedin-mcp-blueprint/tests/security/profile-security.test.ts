@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseConfig } from '../../src/config/config.js';
 import { LinkedInConnectionService } from '../../src/auth/linkedin/connectionService.js';
+import { PostOperationStore } from '../../src/auth/linkedin/postOperationStore.js';
 import { LinkedInMockProvider } from '../../src/auth/linkedin/mockProvider.js';
 import { LinkedInRealProvider } from '../../src/auth/linkedin/realProvider.js';
 import { InMemoryTokenVault, generateVaultKey } from '../../src/auth/linkedin/tokenVault.js';
@@ -38,6 +39,8 @@ function makeRig(now: () => number = () => Date.now()): Rig {
     callBudget: new TokenBucket({ key: 'test', capacity: 100, windowMs: 60000 }, now),
     vault,
     provider,
+    postOps: new PostOperationStore({ duplicateWindowMs: 600_000 }, now),
+    publishBudget: new TokenBucket({ key: 'publish-test', capacity: 100, windowMs: 60000 }, now),
     now,
   });
   return { provider, vault, service, ctxFor };

@@ -1,6 +1,6 @@
 # Current State
 
-**2026-11-26 — MILESTONE 3 (identity & granted-scope verification, mock-driven) COMPLETE & VERIFIED. Next: Milestone 4 (post tools) — NOT started, awaiting owner.**
+**2026-11-27 — MILESTONE 4 (LinkedIn publishing end-to-end, mock/injected-fetch driven) COMPLETE & VERIFIED. Next: Milestone 5 (remote staging) — NOT started, awaiting owner.**
 
 ## Phase 0 → approval → M1 → gate → M2 timeline
 
@@ -25,6 +25,15 @@
 - **Fix during M3**: expired vs not-connected now distinct error codes; tool clock injectable.
 - **Suite 109/109 tests, 13 files**; typecheck/lint/build/audit 0/0/secret-scan clean; pinned deps unchanged; ADR-013 + ADR-014 recorded.
 - **LIVE LinkedIn validation NOT performed** (no app credentials — owner-gated; real provider is unit-tested against injected fetch only). Stopped at M3 boundary with HANDOFF_M3.md; no M4 work started.
+
+## M4 (2026-11-27) — publishing tools, verified Posts API contract
+
+- **Tools**: `linkedin_draft_post` (local validation + preview, no persistence), `linkedin_preview_post` (exact submission payload, author from connection), `linkedin_publish_post` (schema-forced `confirm:true` gate; active connection + `w_member_social` via authorize(); author = sealed-token memberSub; 3000-char limit; daily budget; duplicate ledger; NO auto-retry of uncertain writes).
+- **Verified API contract (official docs)**: `POST /rest/posts`, text-only body schema, `X-Restli-Protocol-Version: 2.0.0` + `Linkedin-Version: 202611`, 201 + `x-restli-id` URN, 4xx=refusal / timeout+5xx+network=ambiguous, 422 duplicate, 429 throttle. **Rate limits: no numeric quota published** — "150/day" retracted as folklore (ADR-015); app-level `PUBLISH_DAILY_LIMIT=12` (bounded 1–100) + duplicate window are OUR safety limits, never claimed LinkedIn quotas.
+- **Write safety (ADR-016)**: local op ledger (content hash + tenant): in-flight lock, duplicate window (10 min default), ambiguous-suspect marking. NOT exactly-once — stated limitations in code + handoff.
+- **memberSub persisted** in TokenSet at callback; status surfaces it; publish refuses `identity-unresolved` while sub is pending (real provider until live userinfo).
+- **Suite 165/165, 16 files** (+56 M4: 33 tool behavior incl. real-provider request shape via injected fetch, 17 security matrix, 6 HTTP E2E full flow). typecheck/lint/build/audit 0/0/scan clean; pinned deps unchanged; ADR-015/016/017 recorded.
+- **LIVE publishing NOT performed** (no credentials — owner-gated since M2). The `urn:li:person:{sub}` author mapping is community-verified, not officially documented — flagged for live confirmation. Stopped at M4 boundary; no M5 work started.
 
 ## M1 facts (verified)
 

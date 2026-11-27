@@ -35,6 +35,14 @@ const ConfigSchema = z.object({
   TOKEN_VAULT_KEY: z.base64().optional(),
   // State store TTL for OAuth 'state' (seconds), default 600 (10 min).
   OAUTH_STATE_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(600),
+  // --- M4 publishing safety limits (application-level, NOT LinkedIn quotas) ---
+  // LinkedIn publishes no numeric per-member/day quota in documentation
+  // (Phase 2 finding, ADR-015). These are OUR conservative safety limits:
+  // a per-tenant daily publication budget and a duplicate-content window.
+  // They can tighten safety; they can NEVER widen authorization, scope or
+  // confirmation requirements — those are code-enforced, not configurable.
+  PUBLISH_DAILY_LIMIT: z.coerce.number().int().min(1).max(100).default(12),
+  PUBLISH_DUPLICATE_WINDOW_MINUTES: z.coerce.number().int().min(1).max(1440).default(10),
 });
 
 export type AppConfig = z.infer<typeof ConfigSchema>;
