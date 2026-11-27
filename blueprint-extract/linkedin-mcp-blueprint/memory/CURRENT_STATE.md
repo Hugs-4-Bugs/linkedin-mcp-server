@@ -1,6 +1,6 @@
 # Current State
 
-**2026-11-27 — MILESTONE 6 (roadmap reconciliation record, staging foundation, real-Postgres tests, Claude+ChatGPT protocol compatibility) COMPLETE & VERIFIED on branch `develop` (pushed to origin/develop; main untouched). Next: Milestone 7 (security hardening) — NOT started, awaiting owner + staging bring-up.**
+**2026-11-27 — MILESTONE 7 (security hardening: threat model, retention enforcement, deletion verification, audit coverage; issues #12/#16) COMPLETE & VERIFIED on branch `develop` (4 commits e842f78..612e7ff; pushed to origin/develop; main untouched). Next: Milestone 8 (release engineering) — NOT started, awaiting owner.**
 
 ## Phase 0 → approval → M1 → gate → M2 timeline
 
@@ -54,6 +54,14 @@
 - **Client compatibility**: client-compat-claude 11/11, client-compat-chatgpt 10/10 — deterministic protocol-level suites (initialize/session/tools/call/auth/errors/reconnect; confirm-gate enforced via protocol). Shared wire contract recorded in MCP_CLIENT_COMPATIBILITY.md. LIVE connector tests NOT performed (owner-side checklists in CLAUDE_/CHATGPT_INTEGRATION.md).
 - **GitHub limitation (verified)**: PAT = Contents:write only — milestones/issues/PRs API writes 403. Intended reconciliation recorded machine-applyable in roadmap/ROADMAP_RECONCILIATION_M6.md (10 milestones mapped to 7 execution milestones; no deletes/closes/reassigns). M6 delivered as direct commits on develop; owner opens/merges PRs.
 - **Suite 248/248 (21 files)**: +15 PG, +11 Claude, +10 ChatGPT, + config additions; lint 0 · audit 0/0 · scan clean.
+
+## M7 (2026-11-27) — security hardening (issues #12/#16, branch develop)
+
+- **Baseline re-verified after another sandbox recycle** (248/248 first; develop ref survived; main untouched).
+- **#16 implemented**: RetentionSweeper per-class TTL deletes (sessions/revoked-tokens/states/ended-ops/audit/budgets) + PeriodicSweeper (boot+interval, shutdown-stopped, config knobs RETENTION_SWEEP_INTERVAL_SECONDS=1h, AUDIT_RETENTION_DAYS=90); deleteUser transactional account-removal cascade; auditedRun tool-call audit (name+outcome, payload-free, log-only failures). This closes the ADR-010/D-006 gap (specified M2, never implemented — found by the M7 review).
+- **#12 documented**: THREAT_MODEL.md (assets, trust boundaries B1–B4, 14-row STRIDE w/ test evidence, residual risks) + DATA_PRIVACY.md (per-class retention table, deletion semantics, log hygiene). ADR-022.
+- **Tests**: +18 (retention 9, threat-model 7, PG +2) → 266/266; lint 0; audit 0/0; scan clean; ZERO dependency changes.
+- **PR creation blocked** (PAT Contents:write only; 403 verified live) — owner PR commands in HANDOFF_M7 §17; Refs #12/#16 only, nothing closed/merged/assigned.
 
 ## M1 facts (verified)
 

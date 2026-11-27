@@ -67,6 +67,15 @@
 - `npm audit` (+ `--omit=dev`) → 0 vulnerabilities; `npm run scan:secrets` → clean (tracked + untracked); `npm ls --depth=0` → exact pinned versions unchanged.
 - LIVE publishing NOT performed (no app credentials — owner-gated). `urn:li:person:{sub}` author mapping is community-verified, flagged for live confirmation (ADR-017).
 
+## M7 verification evidence (2026-11-27, observed output)
+
+- Phase 0: sandbox recycled again — checkout was main@M4-era; develop ref survived; restored = e287a7a = origin/develop (live remote verified); main 85e6683 untouched; 248/248 re-verified BEFORE any M7 work.
+- Phase 1 (authoritative issue bodies from API): #12 "Threat model and security review" (document assets, trust boundaries, prompt injection, token theft, SSRF, OAuth CSRF, isolation, retention and mitigations); #16 "Retention enforcement and deletion verification" (test data-class TTL, disconnect deletion, account removal and log hygiene); both in M7 milestone, no assignees/comments.
+- `npx vitest run` on committed HEAD → "Test Files 23 passed (23) / Tests 266 passed (266)": baseline 248 + retention 9 + threat-model 7 + PG +2. Per-batch: retention 9/9, threat-model 7/7, PG suite 17/17.
+- `npm run typecheck` → 0; `npx eslint .` → 0 errors; `npm run build` → 0; `npm audit` + `--omit=dev` → 0 vulnerabilities; secret scan → clean; commit-level secret grep → only known public test fixtures.
+- Commits (develop): e842f78 (#12 docs+tests) → 9d3346d (#16 impl) → 845ab99 (#16 tests) → 612e7ff (auditSink followup); each verified: SHA/parent/tree/no unintended files; diff-to-tree=0; pushed e287a7a..612e7ff to origin/develop; main untouched before/during/after.
+- PR creation attempted live: 403 "Resource not accessible by personal access token" (fine-grained PAT = Contents:write only; x-accepted-github-permissions: metadata=read). No PR claimed; owner commands in HANDOFF_M7 §17.
+
 ## M6 verification evidence (2026-11-27, observed output)
 
 - Phase 0: sandbox recycled; baseline restored via checkout develop (objects survived) — local == origin/develop == 9db2685; main 85e6683 untouched (verified before/after every push); 212/212 M5 tests re-verified before M6 work.
