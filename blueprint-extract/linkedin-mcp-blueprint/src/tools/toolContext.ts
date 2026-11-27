@@ -28,6 +28,12 @@ export interface ToolContext {
   publishBudget: TokenBucket;
   /** Time source; injectable for deterministic expiry tests. */
   now: () => number;
+  /**
+   * Audit sink (M7 issues #12/#16): tool name + outcome, NEVER payloads or
+   * arguments. Undefined in local stdio mode; SQL audit rows in remote
+   * mode (wired in serverFactory.toolContext).
+   */
+  auditSink?: ((tool: string, outcome: 'ok' | 'error') => Promise<void>) | undefined;
 }
 
 /** Fetch the decrypted token for a tenant or throw a typed error. */
