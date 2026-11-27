@@ -273,7 +273,7 @@ describe('issue #14: self-hosted deployments (the hard constraint)', () => {
     expect(mounts).toBe(false); // route stays unmounted
     const billing = mounts ? new BillingEnforcement({ store: new SqlBillingStore(exec), limits: {} }) : undefined;
     expect(billing).toBeUndefined();
-    await exec.close?.();
+    await exec.close();
   });
 
   it('provider outage cannot affect enforcement: gate path makes no provider call', async () => {

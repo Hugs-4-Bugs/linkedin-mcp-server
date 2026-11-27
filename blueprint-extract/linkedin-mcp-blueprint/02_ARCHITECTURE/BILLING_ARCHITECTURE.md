@@ -151,6 +151,21 @@ half-applied transition.
 | Quota race under concurrency | FOR UPDATE atomic take() | concurrent take() ≤ capacity |
 | Crash mid-webhook | single-transaction apply | restart-survival test |
 | Provider outage | enforcement never calls provider | no-network test |
+| Stale replay after pruning | `webhook_events` rows are NEVER time-pruned (see §6.1) | replay test + retention-sweeper scope test |
+
+### 6.1 Retention decision: `webhook_events` is intentionally NOT in the retention sweeper
+
+**Decision (M9 remediation): do not add `webhook_events` (or `subscriptions` / `entitlements`) to the retention sweeper's DELETE set.**
+
+Rationale — the dedupe rows ARE the replay defense:
+
+- HMAC-SHA256 webhook signatures carry **no expiry**. The only thing preventing a captured, validly-signed request from being applied a second time is the `event_id` unique constraint. Pruning old rows after a TTL would turn a replayed stale event into a *fresh* one.
+- The state machine's terminal-state guard makes most stale re-applications no-ops, **but not all**: a stale `subscription.cancelled` replayed after the tenant re-subscribed (`authenticated`) WOULD apply and wrongly revoke a paying customer. Time-based pruning trades a bounded storage cost for an unbounded correctness risk; a "provider retries for ~24h" horizon is provider delivery policy, not a protocol guarantee.
+- The M7 sweeper (ADR-010) prunes *expiry-shaped* data classes (sessions, states, budgets). Dedupe keys are not expiry-shaped, so they fall outside that policy by design.
+
+**Documented risk:** `webhook_events` grows unboundedly in hosted mode (~one row per provider event, ever).
+
+**Bounded follow-up recommendation (owner decision required, out of M9 scope):** if table growth at hosted scale matters, move *confirmed-superseded* events to an append-only archive table (`webhook_events_archive`) rather than deleting them, with the live table retaining per-tenant the events of the current subscription cycle plus a fixed floor (e.g. most recent N=10k events per tenant); dedupe then checks live-or-archive. This preserves the replay guarantee while bounding live-table size. Requires its own issue with a data-retention review — not implementable silently inside M9.
 
 ## 7. Files (implementation map)
 

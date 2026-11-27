@@ -132,6 +132,7 @@ describe('per-class TTL sweeps', () => {
   });
 
   it('orphaned budget rows older than the window are deleted', async () => {
+    // (existing) — see below for the billing-tables carve-out test.
     await exec.execute({
       sql: `INSERT INTO publish_budgets (tenant_id, window_ms, capacity, hits, updated_at)
             VALUES ('t-budget', 86400000, 3, '[]', $1)`,
@@ -139,6 +140,53 @@ describe('per-class TTL sweeps', () => {
     });
     const r = await sweeper.sweep();
     expect(r.deleted.publish_budgets).toBe(1);
+  });
+
+  // --- M9 remediation: the billing carve-out (documented decision, §6.1
+  // BILLING_ARCHITECTURE.md). webhook_events dedupe rows ARE the replay
+  // defense (HMAC signatures never expire), so the sweeper must NEVER
+  // delete them — however old. subscriptions/entitlements likewise carry
+  // current lifecycle truth, not expiry-shaped data.
+  it('the sweeper NEVER deletes webhook_events/subscriptions/entitlements/usage_counters (replay protection survives)', async () => {
+    const ancient = new Date(Date.now() - 400 * 86_400_000).toISOString(); // ~13 months old
+    await exec.execute({
+      sql: `INSERT INTO webhook_events (event_id, code, subscription_id, tenant_id, occurred_at)
+            VALUES ('evt-ancient-1', 'subscription.charged', 'sub_r', 't-ret', $1)`,
+      params: [ancient],
+    });
+    await exec.execute({
+      sql: `INSERT INTO subscriptions (tenant_id, subscription_id, plan_id, provider_status, entitlement_status, grace_ends_at, updated_at)
+            VALUES ('t-ret', 'sub_r', 'pro', 'active', 'active', NULL, $1)`,
+      params: [ancient],
+    });
+    await exec.execute({
+      sql: `INSERT INTO entitlements (tenant_id, plan_id, status, grace_ends_at, updated_at)
+            VALUES ('t-ret', 'pro', 'active', NULL, $1)`,
+      params: [ancient],
+    });
+    await exec.execute({
+      sql: `INSERT INTO usage_counters (tenant_id, counter, window_ms, hits, updated_at)
+            VALUES ('t-ret', 'tool-calls', 2592000000, '[]', $1)`,
+      params: [ancient],
+    });
+    // A sweep with every horizon long past still must not touch billing rows.
+    const r = await sweeper.sweep();
+    expect(r.deleted.webhook_events).toBeUndefined();
+    expect(r.deleted.subscriptions).toBeUndefined();
+    expect(r.deleted.entitlements).toBeUndefined();
+    expect(r.deleted.usage_counters).toBeUndefined();
+    // Rows all still present:
+    expect(await count('SELECT event_id FROM webhook_events WHERE event_id = $1', ['evt-ancient-1'])).toBe(1);
+    expect(await count('SELECT tenant_id FROM subscriptions WHERE tenant_id = $1', ['t-ret'])).toBe(1);
+    expect(await count('SELECT tenant_id FROM entitlements WHERE tenant_id = $1', ['t-ret'])).toBe(1);
+    expect(await count('SELECT tenant_id FROM usage_counters WHERE tenant_id = $1', ['t-ret'])).toBe(1);
+    // Structural guarantee: no DELETE statement in the sweeper source
+    // targets any billing table (guards against accidental future wiring).
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../../src/storage/retention.ts', import.meta.url), 'utf8');
+    for (const table of ['webhook_events', 'subscriptions', 'entitlements', 'usage_counters']) {
+      expect(src.includes(`DELETE FROM ${table}`), `sweeper must never DELETE FROM ${table}`).toBe(false);
+    }
   });
 });
 
