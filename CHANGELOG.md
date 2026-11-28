@@ -3,6 +3,28 @@
 All notable changes to linkedin-mcp-server. Format: Keep a Changelog;
 versions follow the roadmap until v1.0.0. Dates are UTC.
 
+## [Unreleased — 2026-11-28c] (next-execution program: independent verification + PR4 + README identity)
+
+### Fixed (fresh audit, issue #32)
+- P2: budget-exhausted publish no longer strands the content hash as a
+  permanent 'in-flight' ledger row (both SQL and memory branches exit()).
+- P2: fire-and-forget api_tokens last_used UPDATE is caught — a transient
+  DB error no longer fatally terminates the process on Node 24.
+- P2: per-client rate limiting is proxy-aware (HTTP_TRUSTED_PROXY; XFF
+  honored only from that peer) and the bucket map evicts idle entries;
+  behind the shipped Caddy deployment clients no longer share ONE bucket.
+- P2: PKCE (S256) added to the OAuth authorization-code flow.
+- P3: username-enumeration timing oracle equalized (dummy-hash cost);
+  oversized-webhook handler resolves on error/close; subscriptions
+  read-modify-write locks FOR UPDATE on Postgres; SESSION_COOKIE_NAME
+  honored; billing API routes reject bearer tokens; .env.example matches
+  the real key set (drops phantom STAGING_PUBLIC_URL).
+
+### Docs
+- README rewritten to the verified identity (implementation + documented
+  limitations); Node floor stated as 22.5+ everywhere; recent engineering
+  program summary with test counts.
+
 ## [Unreleased — 2026-11-28b] (follow-up program: adversarial audit + PR1/PR2/PR3 remediation)
 
 ### Fixed (audit findings #22-#29, all evidence-tested)
