@@ -1,4 +1,10 @@
-skills/
+# Workspace-local agent tooling lives under skills/, EXCEPT the three
+# REPO-DISTRIBUTED Agent Skills (product deliverables, must be tracked).
+# Pattern order matters: exclude the children first, then re-include dirs.
+skills/*
+!skills/linkedin-publishing/
+!skills/linkedin-post-scheduling/
+!skills/linkedin-connection-troubleshooting/
 node_modules/
 
 # M5 deployment secrets (never committed)
