@@ -32,6 +32,8 @@ export class StateStoreError extends Error {
 
 interface Entry {
   digest: Buffer; // sha-256 of state, constant-time compare
+  /** PKCE code verifier (issue #32) — state-scoped, single-use with it. */
+  verifier: string;
   tenantKey: string;
   expiresAt: number;
 }
@@ -51,13 +53,23 @@ export class OAuthStateStore {
       if (v.expiresAt <= this.now()) this.entries.delete(k);
     }
     const state = randomBytes(32).toString('base64url');
+    const verifier = randomBytes(48).toString('base64url'); // RFC 7636: 43-128 chars
     const digest = createHash('sha256').update(state).digest();
     this.entries.set(state, {
       digest,
+      verifier,
       tenantKey: tenantKey(tenant),
       expiresAt: this.now() + this.ttlMs,
     });
     return state;
+  }
+
+  /** Issue #32 (PKCE): the S256 code verifier bound to a live state.
+   * Returns undefined when the state is unknown/expired — callers MUST
+   * treat that as a state failure (the verifier is state-scoped). */
+  verifierOf(state: string): string | undefined {
+    const entry = this.entries.get(state);
+    return entry?.verifier;
   }
 
   /**

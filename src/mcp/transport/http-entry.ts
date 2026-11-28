@@ -107,8 +107,13 @@ async function handleBillingWebhook(
   req.on('error', () => {
     failed = true;
   });
+  // Issue #32: after req.destroy() ('too large') the 'end' event never
+  // fires — also resolve on 'close' (emitted for destroyed sockets) and
+  // 'error' so the handler cannot hang open on its closure.
   await new Promise<void>((resolve) => {
     req.on('end', resolve);
+    req.on('close', resolve);
+    req.on('error', resolve);
   });
   if (failed as boolean) {
     jsonError(res, 413, 'payload too large');
@@ -214,6 +219,8 @@ async function isRuntimeReady(runtime: AppRuntime): Promise<{ ok: true } | { ok:
 interface AuthParts {
   authStore: UserAuthStore | undefined;
   authMode: 'session' | 'mock';
+  /** Session cookie name (config.SESSION_COOKIE_NAME — issue #32). */
+  sessionCookieName: string;
 }
 
 /** Extract + validate the request credential; returns null when unauthenticated. */
@@ -231,7 +238,7 @@ async function authenticate(
       return null;
     }
   }
-  const cookie = cookieValue(req, 'lkm_session');
+  const cookie = cookieValue(req, parts.sessionCookieName);
   if (cookie !== undefined) {
     try {
       const session = await parts.authStore.resolveSession(cookie);
@@ -408,6 +415,7 @@ async function handleAuthAndUiRoutes(
   auth: { tenantId: string; via: 'session' | 'bearer'; csrf?: string } | null,
   authStore: UserAuthStore | undefined,
   nonce: string,
+  sessionCookieName: string,
 ): Promise<boolean> {
   const path = routePath(req.url);
   const isUi = path === '/admin' || path === '/admin/';
@@ -524,7 +532,7 @@ async function handleAuthAndUiRoutes(
     return true;
   }
   if (path === '/auth/logout' && req.method === 'POST') {
-    const cookie = cookieValue(req, 'lkm_session');
+    const cookie = cookieValue(req, sessionCookieName);
     if (cookie === undefined || auth === null) {
       jsonError(res, 401, 'authentication required');
       return true;
@@ -632,9 +640,30 @@ async function main(): Promise<void> {
   const authParts: AuthParts = {
     authStore: runtime.authStore,
     authMode: config.AUTH_MODE,
+    sessionCookieName: config.SESSION_COOKIE_NAME,
   };
-  // Per-IP rate limiter (in-process fixed window).
+  // Per-client rate limiter (in-process fixed window). Issue #32:
+  // - When HTTP_TRUSTED_PROXY is set and the socket peer IS that proxy,
+  //   the client identity comes from X-Forwarded-For (the FIRST value —
+  //   closest to the client; later values are untrusted appends). This
+  //   keeps the shipped Caddy deployment from collapsing ALL clients
+  //   into ONE shared bucket (one noisy tenant used to rate-limit the
+  //   whole deployment).
+  // - Without the knob, the socket address is used — XFF is IGNORED, so
+  //   no client can spoof its identity by sending the header directly.
+  // - The bucket Map is periodically EVICTED (idle buckets dropped) so
+  //   unique client IPs cannot grow it without bound.
   const ipBuckets = new Map<string, TokenBucket>();
+  const clientIpOf = (req: IncomingMessage): string => {
+    const peer = req.socket.remoteAddress ?? 'unknown';
+    if (config.HTTP_TRUSTED_PROXY !== undefined && peer === config.HTTP_TRUSTED_PROXY) {
+      const xff = req.headers['x-forwarded-for'];
+      const first = Array.isArray(xff) ? xff[0] : xff;
+      const client = first?.split(',')[0]?.trim();
+      if (client !== undefined && client.length > 0) return client;
+    }
+    return peer;
+  };
   const rateLimit = (ip: string): boolean => {
     let b = ipBuckets.get(ip);
     if (b === undefined) {
@@ -643,6 +672,15 @@ async function main(): Promise<void> {
     }
     return b.take();
   };
+  // Evict idle buckets every 10 minutes (a bucket whose window has fully
+  // elapsed holds no live hits; recreating it later is free).
+  const eviction = setInterval(() => {
+    const cutoff = Date.now() - 60_000;
+    for (const [ip, b] of ipBuckets) {
+      if (b.lastTake() < cutoff) ipBuckets.delete(ip);
+    }
+  }, 600_000);
+  eviction.unref();
 
   const server = createServer((req, res) => {
     const nonce = randomBytes(16).toString('base64');
@@ -655,7 +693,7 @@ async function main(): Promise<void> {
       if (res.writableEnded) metrics.httpEnd(routeClass, res.statusCode);
       else metrics.httpAborted();
     });
-    const ip = req.socket.remoteAddress ?? 'unknown';
+    const ip = clientIpOf(req);
     if (!rateLimit(ip)) {
       jsonError(res, 429, 'rate limit exceeded');
       return;
@@ -665,7 +703,7 @@ async function main(): Promise<void> {
         const auth = await authenticate(req, authParts);
         // Remote mode: /mcp and OAuth routes require authentication.
         const authRequired = runtime.authStore !== undefined;
-        if (await handleAuthAndUiRoutes(req, res, runtime, auth, runtime.authStore, nonce)) return;
+        if (await handleAuthAndUiRoutes(req, res, runtime, auth, runtime.authStore, nonce, authParts.sessionCookieName)) return;
         if (await handleOAuthRoutes(req, res, runtime, auth)) return;
         if (handleMockAuthorize(req, res, runtime)) return;
         // M9 issue #13: provider webhook route (mounted ONLY when billing is

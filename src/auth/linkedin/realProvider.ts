@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Real LinkedIn 3LO adapter. Calls the official endpoints with the pinned
  * self-serve scope set. Injected `fetch` keeps it testable without network
@@ -50,6 +51,14 @@ export class LinkedInRealProvider implements LinkedInOAuthProvider {
     url.searchParams.set('redirect_uri', input.redirectUri);
     url.searchParams.set('state', input.state);
     url.searchParams.set('scope', input.scopes.join(' '));
+    // Issue #32 (PKCE): S256 challenge when a verifier is supplied —
+    // binds the authorization code to this browser round-trip so an
+    // intercepted code cannot be exchanged by a third party.
+    if (input.codeVerifier !== undefined) {
+      const challenge = createHash('sha256').update(input.codeVerifier).digest('base64url');
+      url.searchParams.set('code_challenge', challenge);
+      url.searchParams.set('code_challenge_method', 'S256');
+    }
     return url.toString();
   }
 
@@ -68,6 +77,7 @@ export class LinkedInRealProvider implements LinkedInOAuthProvider {
           redirect_uri: input.redirectUri,
           client_id: input.clientId,
           client_secret: input.clientSecret,
+          ...(input.codeVerifier !== undefined ? { code_verifier: input.codeVerifier } : {}),
         }).toString(),
       });
     } catch (err: unknown) {

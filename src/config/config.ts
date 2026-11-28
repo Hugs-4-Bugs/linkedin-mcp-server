@@ -101,6 +101,10 @@ const ConfigSchema = z.object({
   MAX_BODY_MIB: z.coerce.number().min(1).max(16).default(1),
   // Per-IP request rate limit (requests per minute, default 120).
   HTTP_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(10).max(6000).default(120),
+  /** Issue #32: only when this is set (e.g. '172.18.0.2') will the
+   * server trust X-Forwarded-For from THAT exact peer for rate-limit
+   * identity. Unset = socket address only (safe default; no spoofing). */
+  HTTP_TRUSTED_PROXY: z.string().regex(/^[0-9a-fA-F.:]+$/).optional(),
   // UI cookie name (session).
   SESSION_COOKIE_NAME: z.string().min(1).default('lkm_session'),
   // --- M9 hosted billing (issues #13/#14) ---

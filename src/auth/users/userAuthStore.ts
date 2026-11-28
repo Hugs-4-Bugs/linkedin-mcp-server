@@ -22,6 +22,16 @@ import { asString } from '../../storage/sqlExecutor.js';
 
 const log = createLogger('auth:users');
 
+/** Fixed-cost target for username misses (issue #32 timing oracle).
+ * Lazily computed: hashPassword reads SCRYPT_* constants declared below
+ * this point, so a module-level call would hit the TDZ. */
+let dummyHashCache: string | undefined;
+function dummyHash(): string {
+  dummyHashCache ??= hashPassword('timing-equalizer');
+  return dummyHashCache;
+}
+
+
 export const SESSION_TTL_MS_DEFAULT = 8 * 3600 * 1000; // 8h
 export const SCRYPT_N = 16_384, SCRYPT_R = 8, SCRYPT_P = 1;
 
@@ -118,9 +128,17 @@ export class UserAuthStore {
       params: [username],
     });
     const row = rows[0];
-    // Uniform failure: never reveal whether the username exists.
+    // Uniform failure: never reveal whether the username exists — and
+    // (issue #32) equal WORK on both paths: verify against a dummy hash
+    // when the row is missing so scrypt cost is identical, closing the
+    // username-enumeration timing oracle.
     const ok = row !== undefined && verifyPassword(password, String(row.password_hash));
-    if (!ok) throw new AuthError('invalid-credentials', 'Invalid username or password.');
+    if (!ok) {
+      // Miss path: still pay the identical scrypt cost (issue #32) so the
+      // response time cannot enumerate valid usernames.
+      verifyPassword(password, dummyHash());
+      throw new AuthError('invalid-credentials', 'Invalid username or password.');
+    }
     if (row.disabled_at !== null && row.disabled_at !== undefined) {
       throw new AuthError('user-disabled', 'This account is disabled.');
     }
@@ -221,11 +239,20 @@ export class UserAuthStore {
     if (row.revoked_at !== null && row.revoked_at !== undefined) {
       throw new AuthError('session-revoked', 'API token revoked.');
     }
-    // Fire-and-forget last_used update; failures ignored deliberately.
-    void this.exec.execute({
-      sql: 'UPDATE api_tokens SET last_used_at = $2 WHERE token_hash = $1',
-      params: [tokenDigest(token), new Date(this.now()).toISOString()],
-    });
+    // Fire-and-forget last_used update; failures ignored deliberately —
+    // and CATCH it (issue #32): a bare `void` promise still raises an
+    // unhandled rejection that fatally terminates the process (Node 24
+    // default) on any transient DB error during a bearer-token request.
+    void this.exec
+      .execute({
+        sql: 'UPDATE api_tokens SET last_used_at = $2 WHERE token_hash = $1',
+        params: [tokenDigest(token), new Date(this.now()).toISOString()],
+      })
+      .catch((err: unknown) => {
+        log.warn('api_tokens last_used update failed (ignored)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
     return {
       id: `api-token:${asString(row.tenant_id) ?? 'unknown'}`,
       username: 'api-token',

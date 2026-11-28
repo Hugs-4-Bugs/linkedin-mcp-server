@@ -26,6 +26,13 @@ export class TokenBucket {
     private readonly now: () => number = () => Date.now(),
   ) {}
 
+  /** Last-consumption timestamp (0 when never) — used by owners that
+   * evict idle buckets (http-entry rate limiting). */
+  lastTake(): number {
+    const last = this.hits[this.hits.length - 1];
+    return last ?? 0;
+  }
+
   /** Returns true and consumes a token, or returns false when exhausted. */
   take(): boolean {
     const cutoff = this.now() - this.opts.windowMs;

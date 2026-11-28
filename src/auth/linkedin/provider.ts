@@ -33,6 +33,9 @@ export interface AuthorizeUrlInput {
   redirectUri: string;
   state: string;
   scopes: readonly string[];
+  /** PKCE verifier (S256). Optional for backward compatibility; when
+   * present the authorize URL carries the derived code_challenge. */
+  codeVerifier?: string;
 }
 
 export interface TokenExchangeInput {
@@ -40,6 +43,8 @@ export interface TokenExchangeInput {
   clientSecret: string;
   redirectUri: string;
   code: string;
+  /** PKCE verifier — MUST match the challenge sent at authorize time. */
+  codeVerifier?: string;
 }
 
 export interface OAuthResult extends TokenSet {
