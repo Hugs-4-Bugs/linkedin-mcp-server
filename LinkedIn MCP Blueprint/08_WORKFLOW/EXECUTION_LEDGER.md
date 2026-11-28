@@ -51,6 +51,11 @@ The fine-grained PAT permits: repo read, **issues create**, branch push (git). I
 | PR1 | fix/pr1-scheduler-billing-gate (8b6be59) | F1 F2 F3 F4 (#22-#25) | 411/411; all gates clean; crash-smoke PASS | Line-by-line review (356 lines) recorded above | 875af31 (merged) | #22-#25 |
 | PR2 | fix/pr2-webhook-retention-engines (e65863d) | F5 F6 F8 (#26 #27 #28) | 415/415 (35 files) | Review: signed-content dedupe collision risk negligible (both bodies need valid HMAC); retention terminal-only; cascade best-effort non-blocking | 4e3c287 (merged) | #26-#28 |
 | PR3 | fix/pr3-scheduler-polish | F11 F12 F13 F14 F16 (#29) | 415/415 | Review: off-by-one corrected (test updated to corrected semantics, documented); watchdog bounded; seam removed | merged after 4e3c287 | #29 |
+| PR4 | fix/pr4-publish-reliability (17d7424) | #32: 4×P2 (ledger in-flight leak, fatal last_used rejection, proxy rate limit, PKCE) + 6×P3 (timing oracle, webhook hang, FOR UPDATE, cookie knob, bearer-billing, env drift) | 420/420 (36 files) | Review: PKCE ordering verified; XFF-first-value anti-spoof verified; TDZ bug caught by my own tests then fixed (lazy dummyHash); 5 new acceptance tests | 1d6e0d9 (merged) | #32 |
+
+### next-execution batch verification (2026-11-28c)
+- Remote baseline INDEPENDENTLY verified at start: develop 874edff (PR1-3 ancestry confirmed), main 093b77a untouched.
+- 415-test claim REPRODUCED from clean state (npm ci + build + vitest): 415/415, 35 files, 21.1s, Node 24.22.3. The develop README 'blueprint-only' contradiction diagnosed: commit f6ced10 reverted to the planning-package framing while src/ CI tests all exist — README now rewritten to the verified identity. Classification: functioning MCP server with documented limitations (live LinkedIn + Razorpay live are external owner-side gates).
 
 ## External blockers (unchanged)
 
@@ -62,4 +67,4 @@ Live LinkedIn validation (owner credentials), Razorpay live mode (owner decision
 
 ## Next actionable task
 
-Merge PR1 (clean) to develop, then PR2 (#26-#28).
+(next-execution batch 2026-11-28c): §7 tool-quality review + §8 Agent Skills, then final report.
