@@ -4,3 +4,20 @@ node_modules/
 # M5 deployment secrets (never committed)
 deploy/.env
 deploy/caddy_data/
+
+# Local environment secrets
+.env
+.env.*
+!.env.example
+
+# Build and test artifacts
+dist/
+coverage/
+*.log
+
+# Local database and runtime data
+data/
+
+# Temporary/generated files
+graphify-out/
+tmp/
