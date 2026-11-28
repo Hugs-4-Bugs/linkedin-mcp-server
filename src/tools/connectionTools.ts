@@ -131,9 +131,33 @@ export async function disconnectTool(ctx: ToolContext): Promise<ToolResult> {
   // The DisconnectInputSchema forces confirm: z.literal(true), so a runtime
   // check is unreachable via the SDK path; the schema IS the confirmation gate.
   const had = await ctx.connection.disconnect(ctx.tenant);
+  // Issue #28 (disconnect cascade): a disconnected tenant has no LinkedIn
+  // authorization to publish under; outstanding scheduled posts would
+  // only fail at fire time. Cancel them now, explicitly, so the queue
+  // tells the truth instead of accumulating doomed work. Cancellation
+  // errors never block the disconnect itself (tokens are already gone).
+  let cancelledSchedules = 0;
+  if (ctx.scheduledPosts !== undefined) {
+    try {
+      const outstanding = await ctx.scheduledPosts.list(ctx.tenant.tenantId);
+      for (const row of outstanding) {
+        if (row.status === 'scheduled' || row.status === 'running') {
+          const ok = await ctx.scheduledPosts.cancel(row.id, ctx.tenant.tenantId);
+          if (ok) cancelledSchedules += 1;
+        }
+      }
+    } catch (err) {
+      // Best-effort: any row that survives will fail safely at fire time
+      // ('not-connected') and be recorded as failed.
+      log.warn('disconnect schedule-cascade failed (rows will fail safely at fire time)', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
   return textResult({
     disconnected: true,
     hadTokens: had,
+    cancelledScheduledPosts: cancelledSchedules,
   });
 }
 
