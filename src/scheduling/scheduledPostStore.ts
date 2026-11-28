@@ -102,24 +102,29 @@ export class SqlScheduledPostStore {
     }
     const id = String(row.id);
     const attempts = Number(row.attempts ?? 0);
-    // Bounded retries: at maxAttempts the row is terminally 'failed' by
-    // THIS claim (no other worker can touch it — the same conditional
-    // UPDATE owns the transition).
-    const nextStatus = attempts + 1 >= this.opts.maxAttempts ? 'failed' : 'running';
+    // Bounded retries (issue #29 off-by-one fix): the claim always hands
+    // the row to a worker while attempts < maxAttempts, so a row gets
+    // maxAttempts REAL executions; the terminal 'failed' transition now
+    // happens when a FAILING execution exhausts the budget
+    // (executeOne's markFailed), not at claim time. Rows already at/over
+    // budget (e.g. after crash recovery) are terminally failed HERE —
+    // the same single conditional UPDATE owns that transition.
+    if (attempts >= this.opts.maxAttempts) {
+      const exhausted = await this.exec.execute({
+        sql: `UPDATE scheduled_posts SET status = 'failed', last_error = 'exhausted retries', updated_at = ${this.nowFn()}
+              WHERE id = $1 AND status = 'scheduled'`,
+        params: [id],
+      });
+      if (exhausted === 1) return { claimed: false };
+      return { claimed: false };
+    }
     const affected = await this.exec.execute({
-      sql: `UPDATE scheduled_posts SET status = $1, attempts = attempts + 1, updated_at = ${this.nowFn()}
-            WHERE id = $2 AND status = 'scheduled'`,
-      params: [nextStatus, id],
+      sql: `UPDATE scheduled_posts SET status = 'running', attempts = attempts + 1, updated_at = ${this.nowFn()}
+            WHERE id = $1 AND status = 'scheduled'`,
+      params: [id],
     });
     if (affected !== 1) {
       return { claimed: false }; // lost the race — another worker owns it
-    }
-    if (nextStatus === 'failed') {
-      await this.exec.execute({
-        sql: 'UPDATE scheduled_posts SET last_error = $1 WHERE id = $2',
-        params: ['exhausted retries', id],
-      });
-      return { claimed: false };
     }
     return {
       claimed: true,
@@ -142,7 +147,7 @@ export class SqlScheduledPostStore {
   }
 
   /** Mark a claimed post failed (terminal or awaiting-retry recycles it). */
-  async markFailed(id: string, reason: string, retryable: boolean): Promise<void> {
+  async markFailed(id: string, reason: string, retryable: boolean, nowMs: number = Date.now()): Promise<void> {
     if (retryable) {
       // Back to 'scheduled' for a RETRY — with the next attempt pushed
       // one backoff interval into the future so a single drain() loop
@@ -150,7 +155,7 @@ export class SqlScheduledPostStore {
       // re-submission pressure on a failing provider). Attempts are
       // already counted by the claim; the claim boundary still
       // terminates at maxAttempts.
-      const backoffIso = new Date(Date.now() + (this.opts.retryBackoffMs ?? 60_000)).toISOString();
+      const backoffIso = new Date(nowMs + (this.opts.retryBackoffMs ?? 60_000)).toISOString();
       await this.exec.execute({
         sql: `UPDATE scheduled_posts SET status = 'scheduled', last_error = $1, run_at = $2, updated_at = ${this.nowFn()} WHERE id = $3 AND status = 'running'`,
         params: [reason, backoffIso, id],
