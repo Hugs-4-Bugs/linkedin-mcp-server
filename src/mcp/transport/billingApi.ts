@@ -47,8 +47,10 @@ const COUNTER = 'tool-calls';
 export interface BillingApiParts {
   runtime: AppRuntime;
   config: AppConfig;
-  /** Authenticated tenant from the session middleware (never client-set). */
-  auth: { tenantId: string } | null;
+  /** Authenticated tenant from the session middleware (never client-set).
+   * `via` distinguishes console sessions from bearer API tokens — billing
+   * management accepts SESSIONS only (issue #32). */
+  auth: { tenantId: string; via: 'session' | 'bearer' } | null;
   authStore: import('../../auth/users/userAuthStore.js').UserAuthStore | undefined;
 }
 
@@ -164,10 +166,12 @@ export async function handleBillingApiRoutes(
     return false;
   }
 
-  // All billing API routes require an authenticated session (never the
-  // bearer API-token path: billing management is a console browser flow).
-  if (parts.auth === null) {
-    jsonErr(res, 401, 'authentication required');
+  // All billing API routes require an authenticated SESSION — never the
+  // bearer API-token path (issue #32: billing management is a console
+  // browser flow; the previous `auth !== null` check let bearer tokens
+  // read the GET summary despite the comment claiming otherwise).
+  if (parts.auth?.via !== 'session') {
+    jsonErr(res, 401, 'session authentication required');
     return true;
   }
   const tenantId = parts.auth.tenantId; // server-authoritative

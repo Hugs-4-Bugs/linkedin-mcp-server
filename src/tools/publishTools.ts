@@ -256,6 +256,10 @@ export async function publishPostTool(
     // SQL budget: single transaction-checked take.
     const sqlBudget = ctx.publishBudgetSql;
     if (sqlBudget !== undefined && !(await sqlBudget.take(ctx.tenant.tenantId))) {
+      // Issue #32: exit the ledger row on refusal — an 'in-flight' row
+      // that survives here is never pruned (prune clears ended rows
+      // only) and the content would be refused as duplicate-forever.
+      await ctx.postOps.exit(ctx.tenant.tenantId, hash, 'failure');
       return errorResult(
         'Daily publication budget exhausted for this account; try again tomorrow.',
         'rate-limited',
@@ -272,6 +276,8 @@ export async function publishPostTool(
       throw err;
     }
     if (!ctx.publishBudget.take()) {
+      // Issue #32: same leak as the SQL branch — exit the ledger row.
+      memOps.exit(ctx.tenant.tenantId, hash, 'failure');
       return errorResult(
         'Daily publication budget exhausted for this account; try again tomorrow.',
         'rate-limited',

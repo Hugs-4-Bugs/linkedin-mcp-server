@@ -87,11 +87,16 @@ export class LinkedInConnectionService {
       throw new RateLimitError();
     }
     const state = await this.stateStore.create(tenant);
+    // Issue #32 (PKCE): the S256 verifier travels with the state entry;
+    // the authorize URL carries only the derived challenge.
+    const codeVerifier =
+      this.stateStore instanceof OAuthStateStore ? this.stateStore.verifierOf(state) : undefined;
     const authorizationUrl = this.provider.buildAuthorizeUrl({
       clientId: this.clientId(),
       redirectUri: this.config.LINKEDIN_REDIRECT_URI ?? 'http://127.0.0.1/mock-callback',
       state,
       scopes: LINKEDIN_SCOPES,
+      ...(codeVerifier !== undefined ? { codeVerifier } : {}),
     });
     log.info('connect flow started', { tenant: tenant.tenantId });
     return { authorizationUrl, state };
@@ -102,6 +107,10 @@ export class LinkedInConnectionService {
    * store sealed tokens. Never logs the code.
    */
   async handleCallback(tenant: TenantContext, state: string, code: string): Promise<ConnectionStatusInfo> {
+    // Issue #32 (PKCE): lift the verifier BEFORE consume() deletes the
+    // entry (single-use semantics) — it must accompany the token exchange.
+    const codeVerifier =
+      this.stateStore instanceof OAuthStateStore ? this.stateStore.verifierOf(state) : undefined;
     try {
       await this.stateStore.consume(state, tenant);
     } catch (err) {
@@ -115,6 +124,7 @@ export class LinkedInConnectionService {
       clientSecret: this.config.LINKEDIN_CLIENT_SECRET ?? 'mock-secret',
       redirectUri: this.config.LINKEDIN_REDIRECT_URI ?? 'http://127.0.0.1/mock-callback',
       code,
+      ...(codeVerifier !== undefined ? { codeVerifier } : {}),
     });
     await this.vault.put(tenant, {
       accessToken: result.accessToken,

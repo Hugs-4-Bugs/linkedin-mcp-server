@@ -131,10 +131,19 @@ export class SqlBillingStore implements BillingStore {
       if (claimed === 0) {
         return 'duplicate' as const;
       }
-      const rows = await tx.query({
-        sql: `SELECT tenant_id, subscription_id, plan_id, provider_status,
+      // Issue #32: lock the subscription row for the read-modify-write
+      // (same discipline as usage_counters): two concurrent DISTINCT
+      // events for one tenant previously interleaved into a lost update.
+      // SQLite serializes writers on one connection; PG needs the lock.
+      const subSelect = this.exec.kind === 'postgres'
+        ? `SELECT tenant_id, subscription_id, plan_id, provider_status,
                      entitlement_status, grace_ends_at, updated_at
-              FROM subscriptions WHERE tenant_id = $1`,
+              FROM subscriptions WHERE tenant_id = $1 FOR UPDATE`
+        : `SELECT tenant_id, subscription_id, plan_id, provider_status,
+                     entitlement_status, grace_ends_at, updated_at
+              FROM subscriptions WHERE tenant_id = $1`;
+      const rows = await tx.query({
+        sql: subSelect,
         params: [event.tenantId],
       });
       const current = rows[0] === undefined ? undefined : rowToRecord(rows[0]);
