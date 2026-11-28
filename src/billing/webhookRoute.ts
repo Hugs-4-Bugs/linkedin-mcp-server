@@ -15,7 +15,7 @@
  * The route exists ONLY when billing is enabled and mounted with a
  * configured secret — self-hosted servers never register it.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { createLogger } from '../observability/logger.js';
 import { WebhookVerificationError, parseSubscriptionEvent, verifyRazorpaySignature } from './providerEvents.js';
 import type { BillingStore } from './billingStore.js';
@@ -46,7 +46,12 @@ export type WebhookResult = 'verified-applied' | 'verified-duplicate' | 'invalid
 export async function processWebhook(
   rawBody: Buffer,
   signature: string | undefined,
-  eventId: string | undefined,
+  /**
+   * x-razorpay-event-id header value. NOT trusted for dedupe anymore
+   * (issue #26): when the signed body lacks event_id the key is derived
+   * from the signed content. Parameter kept for signature compatibility.
+   */
+  _eventId: string | undefined,
   opts: WebhookRouteOptions,
 ): Promise<WebhookResult> {
   const now = opts.now?.() ?? Date.now();
@@ -68,11 +73,19 @@ export async function processWebhook(
     }
     throw err;
   }
-  if (event.eventId === '' ) {
-    if (eventId === undefined || eventId.length === 0) {
-      return 'invalid-payload'; // dedupe key mandatory
-    }
-    event = { ...event, eventId };
+  if (event.eventId === '') {
+    // Issue #26 (replay window): the body has no event_id. The dedupe
+    // key MUST be derived from the signed content — never from the
+    // unauthenticated x-razorpay-event-id header (the HMAC covers only
+    // the body, so a captured validly-signed replay with varied header
+    // ids used to insert fresh rows and re-apply the event).
+    // sha256(body||signature) is deterministic for the same signed
+    // delivery: replays collide and dedupe, regardless of headers.
+    const derived = createHash('sha256')
+      .update(rawBody)
+      .update(signature ?? '')
+      .digest('hex');
+    event = { ...event, eventId: `derived:${derived}` };
   }
   const outcome = await opts.store.applyEvent(event, now);
   try {

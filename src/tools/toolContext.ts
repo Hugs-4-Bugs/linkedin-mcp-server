@@ -24,6 +24,9 @@ export interface ToolContext {
   postOps: PostOperationStore | SqlPostOperationStore;
   /** SQL publish budget when persistence is active (ADR-018). */
   publishBudgetSql?: SqlPublishBudget | undefined;
+  /** Scheduled-post store when persistence is active (issue #28:
+   * disconnect cascade-cancels outstanding schedules). */
+  scheduledPosts?: import('../scheduling/scheduledPostStore.js').SqlScheduledPostStore | undefined;
   /** Daily publication budget for this tenant (app safety limit, ADR-015). */
   publishBudget: TokenBucket;
   /** Time source; injectable for deterministic expiry tests. */

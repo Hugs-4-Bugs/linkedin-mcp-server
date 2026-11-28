@@ -39,6 +39,9 @@ export interface RetentionPolicy {
   apiTokenRevokedGraceMs: number;
   /** Publish-budget orphan horizon — the daily window (default 24h). */
   budgetWindowMs: number;
+  /** Terminal scheduled-post retention (default 90d). Outstanding rows
+   * (scheduled/running) are never swept — only terminal history. */
+  scheduledPostRetentionMs: number;
 }
 
 export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
@@ -48,6 +51,10 @@ export const DEFAULT_RETENTION_POLICY: RetentionPolicy = {
   auditRetentionMs: 90 * 86_400_000,
   apiTokenRevokedGraceMs: 86_400_000,
   budgetWindowMs: 86_400_000,
+  /** Issue #28: terminal scheduled_posts (published/failed/cancelled)
+   * kept for 90 days for audit/debugging, then swept. Outstanding rows
+   * (scheduled/running) are NEVER touched by retention. */
+  scheduledPostRetentionMs: 90 * 86_400_000,
 };
 
 export interface SweepReport {
@@ -113,6 +120,14 @@ export class RetentionSweeper {
     deleted.publish_budgets = await this.exec.execute({
       sql: 'DELETE FROM publish_budgets WHERE updated_at < $1',
       params: [new Date(now - this.policy.budgetWindowMs).toISOString()],
+    });
+
+    // scheduled_posts (issue #28): TERMINAL rows only — published,
+    // failed or cancelled older than the retention horizon. Outstanding
+    // work (scheduled/running) is never deleted by retention.
+    deleted.scheduled_posts = await this.exec.execute({
+      sql: `DELETE FROM scheduled_posts WHERE status IN ('published', 'failed', 'cancelled') AND updated_at < $1`,
+      params: [new Date(now - this.policy.scheduledPostRetentionMs).toISOString()],
     });
 
     const total = Object.values(deleted).reduce((a, b) => a + b, 0);

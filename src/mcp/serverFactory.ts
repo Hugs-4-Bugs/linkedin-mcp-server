@@ -352,6 +352,7 @@ function toolContext(runtime: AppRuntime): ToolContext {
     postOps: runtime.postOps,
     publishBudget: runtime.publishBudgets.for(`publish:${tenant.tenantId}`),
     publishBudgetSql: runtime.publishBudgetSql,
+    scheduledPosts: runtime.scheduledPosts,
     now: () => Date.now(),
     // Audit sink (M7 #12/#16): tool name + outcome only — never payloads.
     // SQL-backed in remote mode; absent in local stdio (no authStore).
