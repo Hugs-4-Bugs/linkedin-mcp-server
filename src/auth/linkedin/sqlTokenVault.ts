@@ -42,8 +42,11 @@ export class SqlTokenVault implements TokenVault {
         tenantKey(tenant),
         s.ct,
         s.iv,
-        // tag lives inside ct; stored separately for schema clarity
-        s.ct.slice(-24), // last 16 bytes b64 ≈ 24 chars (tag)
+        // Tag lives inside ct. Derive it correctly (issue #29): decode
+        // the base64 ct and take the LAST 16 BYTES (the GCM tag), then
+        // re-encode — slicing base64 CHARS was misaligned whenever
+        // ct.length % 3 !== 0 and stored garbage in the column.
+        Buffer.from(s.ct, 'base64').subarray(-16).toString('base64'),
         tokens.expiresAt,
         tokens.scopes.join(' '),
         tokens.memberSub ?? null,

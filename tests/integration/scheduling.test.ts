@@ -85,18 +85,35 @@ describe('durable scheduling store', () => {
     expect(rows[0]?.lastError).toContain('interrupted');
   });
 
-  it('terminally fails exhausted rows at the claim boundary (bounded retries)', async () => {
+  it('bounded retries: a row gets maxAttempts REAL executions; recovery path fails rows already at budget (issue #29 off-by-one fix)', async () => {
     const row = await store.insert({ tenantId: 't4', postText: 'exhaust', runAtMs: Date.now() - 1_000 });
-    // attempts = 2, next claim attempt 3 = maxAttempts -> terminal fail.
+    // attempts = 2, maxAttempts = 3: the claim MUST hand the row to a
+    // worker (the third execution is real; the OLD behavior failed it at
+    // the claim — the off-by-one).
     await exec.execute({
       sql: 'UPDATE scheduled_posts SET attempts = 2 WHERE id = $1',
       params: [row.id],
     });
     const c = await store.claimDue(Date.now(), 't4');
-    expect(c.claimed).toBe(false); // claim transitions it to failed, not to a worker
+    expect(c.claimed).toBe(true); // third REAL execution is granted
+    expect(c.post?.attempts).toBe(3);
+    // A failing execution at attempts=3 terminal-fails via markFailed:
+    await store.markFailed(row.id, 'publish refused', false, Date.now());
     const rows = await store.list('t4');
     expect(rows[0]?.status).toBe('failed');
-    expect(rows[0]?.lastError).toBe('exhausted retries');
+    expect(rows[0]?.lastError).toBe('publish refused');
+    // And rows ALREADY at/over budget (crash-recovery path) terminally
+    // fail at the claim — no further execution is granted:
+    const row2 = await store.insert({ tenantId: 't4', postText: 'exhaust2', runAtMs: Date.now() - 1_000 });
+    await exec.execute({
+      sql: 'UPDATE scheduled_posts SET attempts = 3 WHERE id = $1',
+      params: [row2.id],
+    });
+    const c2 = await store.claimDue(Date.now(), 't4');
+    expect(c2.claimed).toBe(false);
+    const rows2 = await store.list('t4');
+    expect(rows2.find((r) => r.id === row2.id)?.status).toBe('failed');
+    expect(rows2.find((r) => r.id === row2.id)?.lastError).toBe('exhausted retries');
   });
 
   it('cancels only while not executed; only for the owning tenant', async () => {

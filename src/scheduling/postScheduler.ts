@@ -40,6 +40,9 @@ export interface SchedulerOptions {
   readonly pollMs: number;          // poll interval
   readonly maxAttempts: number;    // bounded retries
   readonly now: () => number;       // injectable clock
+  /** Hard cap per scheduled execution; a wedged executor cannot wedge
+   * the drain loop. Default 60s. */
+  readonly executionTimeoutMs?: number;
   readonly executor: (post: { id: string; tenantId: string; postText: string }) => Promise<PublishOutcome>;
 }
 
@@ -96,11 +99,10 @@ function toolContextFromRuntime(runtime: AppRuntime): ToolContext {
   // The scheduler runs OUTSIDE a request: runWithTenant pins the post's
   // tenant for the duration of the execution so every gate (vault,
   // budget, billing) resolves the SAME tenant the post was created for.
-  // The factory is injected by wireScheduler (which owns the real
-  // toolContext module reference); the fallback mirrors its shape.
-  if (toolContextFn !== undefined) {
-    return toolContextFn(runtime);
-  }
+  // The scheduler runs outside requests; runWithTenant (in executeOne)
+  // pins the post's tenant for each execution, so currentTenant()
+  // resolves the post's tenant at fire time. Production never injects
+  // a factory — serverFactory constructs the scheduler directly.
   const tenant = currentTenant();
   return {
     config: runtime.config,
@@ -119,10 +121,18 @@ function toolContextFromRuntime(runtime: AppRuntime): ToolContext {
   };
 }
 
-// Injected by wireScheduler to avoid a circular import (serverFactory
-// imports scheduler wiring; the scheduler needs the toolContext factory
-// that lives in serverFactory). Lazily resolved, never at module load.
-let toolContextFn: ((runtime: AppRuntime) => ToolContext) | undefined;
+
+/** Reject with a TimeoutError after ms, leaving the underlying promise
+ * to its own devices (it is never awaited again by this path). */
+function withTimeout<T>(p: Promise<T>, ms: number | undefined, label: string): Promise<T> {
+  if (ms === undefined) return p;
+  const timeoutErr = new Error(label);
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => { reject(timeoutErr); }, ms);
+    t.unref();
+    p.then((v) => { clearTimeout(t); resolve(v); }, (e: unknown) => { clearTimeout(t); reject(e instanceof Error ? e : new Error(String(e))); });
+  });
+}
 
 export class PostScheduler {
   private timer: NodeJS.Timeout | undefined;
@@ -188,7 +198,12 @@ export class PostScheduler {
     let outcome: PublishOutcome;
     let retryable = false;
     try {
-      outcome = await runWithTenant({ tenantId, userId: tenantId }, async () => this.opts.executor({ id, tenantId, postText }));
+      const execution = runWithTenant({ tenantId, userId: tenantId }, async () => this.opts.executor({ id, tenantId, postText }));
+      // Issue #29 (watchdog): a wedged executor (hung provider call,
+      // stuck socket) must not wedge the drain loop forever — bound each
+      // execution with a hard timeout. On timeout the row is retried
+      // (bounded) like any other infrastructure error.
+      outcome = await withTimeout(execution, this.opts.executionTimeoutMs, 'scheduled execution timed out');
     } catch (err) {
       // Thrown = unexpected infrastructure error: retryable (bounded).
       retryable = true;
@@ -214,7 +229,7 @@ export class PostScheduler {
       return;
     }
     try {
-      await this.store.markFailed(id, outcome.error ?? 'publish refused', retryable);
+      await this.store.markFailed(id, outcome.error ?? 'publish refused', retryable, this.opts.now());
     } catch (err) {
       // Issue #25: failure-marking failures are logged; the row stays
       // 'running' and recoverInterrupted() will handle it at next boot.
@@ -226,24 +241,3 @@ export class PostScheduler {
   }
 }
 
-/** Wire the scheduler into a runtime's lifecycle (persistent mode only). */
-export function wireScheduler(
-  runtime: AppRuntime,
-  deps: {
-    exec: import('../storage/sqlExecutor.js').SqlExecutor;
-    toolContextFactory: (runtime: AppRuntime) => ToolContext;
-    pollMs?: number;
-    maxAttempts?: number;
-    now?: () => number;
-  },
-): PostScheduler {
-  toolContextFn = deps.toolContextFactory;
-  const scheduler = new PostScheduler({ exec: deps.exec }, {
-    pollMs: deps.pollMs ?? 5_000,
-    maxAttempts: deps.maxAttempts ?? 3,
-    now: deps.now ?? (() => Date.now()),
-    executor: toolExecutor(runtime),
-  });
-  void scheduler.recover().then(() => { scheduler.start(); });
-  return scheduler;
-}

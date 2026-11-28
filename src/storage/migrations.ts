@@ -312,7 +312,7 @@ export const MIGRATIONS: readonly Migration[] = [
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`,
-      `CREATE INDEX IF NOT EXISTS idx_scheduled_posts_due ON scheduled_posts(tenant_id, run_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_scheduled_posts_due ON scheduled_posts(tenant_id, run_at) WHERE status = 'scheduled'`,
     ],
   },
 ];
