@@ -24,6 +24,7 @@ import { createLogger } from '../observability/logger.js';
 import type { AppRuntime } from '../mcp/serverFactory.js';
 import { publishPostTool } from '../tools/publishTools.js';
 import type { ToolContext } from '../tools/toolContext.js';
+import type { ToolResult } from '../tools/connectionTools.js';
 import { currentTenant, runWithTenant } from '../identity/requestTenant.js';
 import { SqlScheduledPostStore } from './scheduledPostStore.js';
 
@@ -44,15 +45,34 @@ export interface SchedulerOptions {
 
 /**
  * Build the default executor: runs the REAL publishPostTool under the
- * post's tenant identity, through the runtime's ToolContext — so the
- * scheduled publish passes the same authorization, budget, duplicate
- * and billing gates as a manual one.
+ * post's tenant identity, through the runtime's ToolContext — wrapped in
+ * the SAME billing gate and audit/metrics wrappers the MCP dispatch
+ * uses (issue #22: the scheduler previously called publishPostTool
+ * directly and BYPASSED entitlement + quota + audit entirely).
+ *
+ * Wrappers are injected by the caller (serverFactory) so this module
+ * stays import-cycle-free; the fallback (plain run) only applies when
+ * no gate is provided (pure in-memory local mode: no billing, and the
+ * scheduler itself refuses to run without persistence anyway).
  */
-export function toolExecutor(runtime: AppRuntime): SchedulerOptions['executor'] {
+export interface ExecutorWrappers {
+  /** Entitlement+quota gate around the tool call (may refuse). */
+  gate: (tool: string, fn: () => Promise<ToolResult>) => Promise<ToolResult>;
+  /** Audit row + tool-call metric emission (never breaks the call). */
+  audited: (tool: string, fn: () => Promise<ToolResult>) => Promise<ToolResult>;
+}
+
+export function toolExecutor(
+  runtime: AppRuntime,
+  wrappers?: ExecutorWrappers,
+): SchedulerOptions['executor'] {
+  const gate = wrappers?.gate ?? (async (_t, fn) => fn());
+  const audited = wrappers?.audited ?? (async (_t, fn) => fn());
   return async (post) => {
     try {
       const ctx = toolContextFromRuntime(runtime);
-      const result = await publishPostTool(ctx, { text: post.postText, confirm: true });
+      const result = await audited('linkedin_publish_post', () => gate('linkedin_publish_post', async () =>
+        await publishPostTool(ctx, { text: post.postText, confirm: true })));
       // publishPostTool returns isError results for expected refusals
       // (not-connected, expired, duplicate, budget, entitlement). Those
       // are NOT retryable — the tool layer already decided.
@@ -120,7 +140,12 @@ export class PostScheduler {
   start(): void {
     if (this.timer !== undefined) return;
     const tick = (): void => {
-      void this.drain();
+      // Issue #25: a tick error (DB hiccup, pool exhaustion) must NEVER
+      // surface as an unhandled rejection — Node >=15 default-terminates
+      // the process on those. Log and let the next tick retry.
+      void this.drain().catch((err: unknown) => {
+        log.error('scheduler tick failed (recoverable)', { error: err instanceof Error ? err.message : String(err) });
+      });
     };
     this.timer = setInterval(tick, this.opts.pollMs);
     this.timer.unref(); // never keep the process alive on its own
@@ -170,11 +195,33 @@ export class PostScheduler {
       outcome = { published: false, error: err instanceof Error ? err.message : String(err) } satisfies PublishOutcome;
     }
     if (outcome.published) {
-      await this.store.markPublished(id, outcome.postUrn ?? 'unknown-urn');
-      log.info('scheduled post published', { id, tenant: tenantId });
+      // Issue #24: the store guard now reports whether the row was still
+      // 'running' — a lost guard means the user cancelled mid-execution
+      // and the provider content already went out; the ROW must stay
+      // 'cancelled' (no silent overwrite) and we log the collision.
+      // Issue #25: store errors after a successful publish degrade to a
+      // log line, never an unhandled rejection; the post DID go out.
+      const won = await this.store.markPublished(id, outcome.postUrn ?? 'unknown-urn').catch(() => null);
+      if (won === null) {
+        log.error('markPublished failed (post was published; row state stale)', { id, tenant: tenantId });
+        return;
+      }
+      if (won) {
+        log.info('scheduled post published', { id, tenant: tenantId });
+      } else {
+        log.warn('scheduled post published but row was cancelled mid-execution; keeping cancelled state', { id, tenant: tenantId });
+      }
       return;
     }
-    await this.store.markFailed(id, outcome.error ?? 'publish refused', retryable);
+    try {
+      await this.store.markFailed(id, outcome.error ?? 'publish refused', retryable);
+    } catch (err) {
+      // Issue #25: failure-marking failures are logged; the row stays
+      // 'running' and recoverInterrupted() will handle it at next boot.
+      log.error('markFailed failed (row left for restart recovery)', {
+        id, tenant: tenantId, error: err instanceof Error ? err.message : String(err),
+      });
+    }
     log.warn('scheduled post not published', { id, tenant: tenantId, retryable, error: outcome.error?.slice(0, 120) });
   }
 }

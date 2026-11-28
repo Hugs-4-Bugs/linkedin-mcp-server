@@ -28,7 +28,8 @@ import { SqlOAuthStateStore } from '../auth/linkedin/sqlStateStore.js';
 import { UserAuthStore } from '../auth/users/userAuthStore.js';
 import { currentTenant } from '../identity/requestTenant.js';
 import { SqlScheduledPostStore } from '../scheduling/scheduledPostStore.js';
-import { PostScheduler, toolExecutor } from '../scheduling/postScheduler.js';
+import { PostScheduler, toolExecutor, type ExecutorWrappers } from '../scheduling/postScheduler.js';
+import { classify } from '../policy/autonomyTiers.js';
 import {
   SCHEDULE_TOOL_SPEC,
   LIST_SCHEDULED_TOOL_SPEC,
@@ -58,6 +59,7 @@ import {
   connectTool,
   disconnectTool,
   statusTool,
+  type ToolResult,
 } from '../tools/connectionTools.js';
 import {
   PROFILE_TOOL_SPEC,
@@ -291,11 +293,25 @@ export async function buildPersistentRuntime(config: AppConfig): Promise<AppRunt
     scheduler: undefined,
     close: async (): Promise<void> => { /* owned by the real runtime below */ },
   } satisfies AppRuntime;
+  // Issue #22 (P0): the scheduler executor now passes the SAME
+  // entitlement+quota gate and audit/metrics wrappers the MCP dispatch
+  // uses. gate resolves the tenant from ALS (runWithTenant pins the
+  // post's tenant in executeOne); audit rows + tool metrics flow through
+  // the real authStore when present.
+  const schedulerWrappers: ExecutorWrappers = {
+    gate: (tool, fn) => withBillingGate(schedulerRuntime, tool, () => fn()) as unknown as Promise<ToolResult>,
+    audited: (tool, fn) => {
+      // auditedRun needs a ToolContext; build one per execution under
+      // the pinned tenant (same shape toolContext uses).
+      const ctx = toolContext(schedulerRuntime);
+      return auditedRun(tool, ctx, () => fn());
+    },
+  };
   const scheduler = new PostScheduler({ exec }, {
     pollMs: 5_000,
     maxAttempts: 3,
     now: () => Date.now(),
-    executor: toolExecutor(schedulerRuntime),
+    executor: toolExecutor(schedulerRuntime, schedulerWrappers),
   });
   void scheduler.recover().then(() => { scheduler.start(); });
   return {
@@ -576,20 +592,68 @@ function registerScheduleTools(server: McpServer, runtime: AppRuntime): void {
 }
 
 export function createMcpServer(runtime: AppRuntime): McpServer {
-  const server = new McpServer({
+  const raw = new McpServer({
     name: runtime.config.SERVER_NAME,
     version: runtime.config.SERVER_VERSION,
     title: 'LinkedIn MCP (self-serve MVP)',
     description:
       'Authorized LinkedIn integration: sign-in profile, member posting. Search/messaging/organization capabilities are not available via self-serve APIs and are not exposed.',
   });
-  registerStatusTool(server, runtime);
-  registerConnectionTools(server, runtime);
-  registerProfileTools(server, runtime);
-  registerPublishTools(server, runtime);
-  registerScheduleTools(server, runtime);
+  registerStatusTool(raw, runtime);
+  registerConnectionTools(raw, runtime);
+  registerProfileTools(raw, runtime);
+  registerPublishTools(raw, runtime);
+  registerScheduleTools(raw, runtime);
+  // Issue #23 (dead policy code): the autonomy tier catalog is now
+  // ENFORCED at dispatch — every registered tool must be classified,
+  // and tier-C/D tools must carry confirm:true in their arguments. The
+  // guard is payload-independent: it reads only the tool name + the
+  // boolean confirm flag, never content.
+  const server = withTierPolicyGuard(raw);
   return server;
 }
+
+/**
+ * Issue #23: interpose the autonomy-tier guard on every registered tool
+ * handler. Unclassified tools FAIL CLOSED at dispatch (a future tool
+ * cannot ship unclassified-and-unchecked). Tier C/D require the caller
+ * to pass confirm===true — this is defense-in-depth ON TOP of the
+ * per-tool z.literal(true) schemas (belt and suspenders: the schema
+ * gate rejects malformed args; this gate rejects an unclassified tool
+ * even if its schema forgot the literal).
+ */
+/* eslint-disable @typescript-eslint/no-deprecated, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any -- the SDK's
+   registerTool raw-shape form is deprecated in favor of z.object(); the
+   existing catalog (predating this guard) uses the raw-shape API, and this
+   interposition must match the SAME overloads to wrap it. The any/never
+   casts bridge the two generic overloads; migration of the whole catalog
+   to z.object registration is a separate, unrelated change. */
+function withTierPolicyGuard(server: McpServer): McpServer {
+  const originalRegister = server.registerTool.bind(server) as
+    (name: string, config: Record<string, unknown>, cb: (...cbArgs: unknown[]) => unknown) => unknown;
+  server.registerTool = ((name: string, config: Record<string, unknown>, cb: (...cbArgs: unknown[]) => unknown): unknown => {
+    const guarded = async (...cbArgs: unknown[]): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> => {
+      // Tier enforcement reads ONLY the tool name + the boolean confirm
+      // flag of the (schema-validated) args — never content.
+      const firstArg = cbArgs[0];
+      const toolArgs = (typeof firstArg === 'object' && firstArg !== null ? firstArg : {}) as { confirm?: unknown };
+      const decision = classify(name, {
+        confirm: toolArgs.confirm === true,
+        durable: true, // persistence wiring is server-side, not caller-controlled
+      });
+      if (!decision.allowed) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'refused by autonomy tier policy', tier: decision.tier, reason: decision.reason }) }],
+          isError: true,
+        };
+      }
+      return await (cb(...cbArgs) as Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }>);
+    };
+    return originalRegister(name, config, guarded);
+  }) as typeof server.registerTool;
+  return server;
+}
+/* eslint-enable @typescript-eslint/no-deprecated, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-explicit-any */
 
 /**
  * M9 issue #14 — hosted entitlement gate at tool dispatch.

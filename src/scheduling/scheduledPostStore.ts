@@ -127,12 +127,18 @@ export class SqlScheduledPostStore {
     };
   }
 
-  /** Mark a claimed post successfully published. */
-  async markPublished(id: string, postUrn: string): Promise<void> {
-    await this.exec.execute({
-      sql: `UPDATE scheduled_posts SET status = 'published', post_urn = $1, updated_at = ${this.nowFn()} WHERE id = $2`,
+  /**
+   * Mark a claimed post successfully published.
+   * Issue #24 (cancel/claim race): guarded by status='running' and
+   * returns false when the row was cancelled mid-execution — the caller
+   * keeps the cancelled state instead of silently overwriting it.
+   */
+  async markPublished(id: string, postUrn: string): Promise<boolean> {
+    const affected = await this.exec.execute({
+      sql: `UPDATE scheduled_posts SET status = 'published', post_urn = $1, updated_at = ${this.nowFn()} WHERE id = $2 AND status = 'running'`,
       params: [postUrn, id],
     });
+    return affected === 1;
   }
 
   /** Mark a claimed post failed (terminal or awaiting-retry recycles it). */
@@ -152,7 +158,7 @@ export class SqlScheduledPostStore {
       return;
     }
     await this.exec.execute({
-      sql: `UPDATE scheduled_posts SET status = 'failed', last_error = $1, updated_at = ${this.nowFn()} WHERE id = $2`,
+      sql: `UPDATE scheduled_posts SET status = 'failed', last_error = $1, updated_at = ${this.nowFn()} WHERE id = $2 AND status = 'running'`,
       params: [reason, id],
     });
   }
