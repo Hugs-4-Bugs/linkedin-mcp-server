@@ -272,6 +272,49 @@ export const MIGRATIONS: readonly Migration[] = [
       `CREATE INDEX IF NOT EXISTS idx_usage_counters_tenant ON usage_counters(tenant_id)`,
     ],
   },
+  {
+    // M10-followup (master assignment steps 12/16): durable post
+    // scheduling. scheduled_posts is the durable queue: one row per
+    // scheduled publication, claimed atomically for execution so
+    // concurrent workers cannot double-publish (the claim sets
+    // status='running' + attempt bookkeeping in ONE conditional UPDATE —
+    // exactly one worker's UPDATE affects the row). State machine:
+    // scheduled -> running -> (published | failed | cancelled).
+    id: 3,
+    name: 'scheduled posts',
+    postgres: [
+      `CREATE TABLE IF NOT EXISTS scheduled_posts (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        post_text TEXT NOT NULL,
+        run_at TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        post_urn TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`,
+      // Claim index: the scheduler polls due rows; partial index keeps it
+      // tiny (only outstanding work) on both dialects.
+      `CREATE INDEX IF NOT EXISTS idx_scheduled_posts_due ON scheduled_posts(tenant_id, run_at) WHERE status = 'scheduled'`,
+    ],
+    sqlite: [
+      `CREATE TABLE IF NOT EXISTS scheduled_posts (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        post_text TEXT NOT NULL,
+        run_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        post_urn TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE INDEX IF NOT EXISTS idx_scheduled_posts_due ON scheduled_posts(tenant_id, run_at)`,
+    ],
+  },
 ];
 
 /** Apply all pending migrations idempotently. */

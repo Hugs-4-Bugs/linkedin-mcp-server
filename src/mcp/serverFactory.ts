@@ -27,6 +27,18 @@ import { SqlTokenVault } from '../auth/linkedin/sqlTokenVault.js';
 import { SqlOAuthStateStore } from '../auth/linkedin/sqlStateStore.js';
 import { UserAuthStore } from '../auth/users/userAuthStore.js';
 import { currentTenant } from '../identity/requestTenant.js';
+import { SqlScheduledPostStore } from '../scheduling/scheduledPostStore.js';
+import { PostScheduler, toolExecutor } from '../scheduling/postScheduler.js';
+import {
+  SCHEDULE_TOOL_SPEC,
+  LIST_SCHEDULED_TOOL_SPEC,
+  CANCEL_SCHEDULED_TOOL_SPEC,
+  schedulePostTool,
+  listScheduledPostsTool,
+  cancelScheduledPostTool,
+  SchedulePostInputSchema,
+  CancelScheduledPostInputSchema,
+} from '../tools/scheduleTools.js';
 import { metrics } from '../observability/metrics.js';
 import {
   BillingEnforcement,
@@ -113,6 +125,13 @@ export interface AppRuntime {
    * Undefined in in-memory mode (always ready).
    */
   readinessExecutor: import('../storage/sqlExecutor.js').SqlExecutor | undefined;
+  /**
+   * Master assignment steps 12/16: durable post scheduling store +
+   * scheduler. Undefined in in-memory mode (scheduling refuses there —
+   * an undurable schedule would be a fake feature).
+   */
+  scheduledPosts: SqlScheduledPostStore | undefined;
+  scheduler: PostScheduler | undefined;
   /** Close persistent resources (DB pool). No-op in in-memory mode. */
   close(): Promise<void>;
 }
@@ -151,6 +170,8 @@ export function buildRuntime(config: AppConfig): AppRuntime {
     billing: undefined,
     billingStore: undefined,
     readinessExecutor: undefined,
+    scheduledPosts: undefined,
+    scheduler: undefined,
     async close(): Promise<void> {
       /* in-memory runtime: nothing to close */
     },
@@ -244,6 +265,39 @@ export async function buildPersistentRuntime(config: AppConfig): Promise<AppRunt
       } satisfies Partial<RetentionPolicy>)
     : undefined;
   const { billing, billingStore } = buildBilling(config, exec);
+  const scheduledPosts = new SqlScheduledPostStore(exec, { maxAttempts: 3 });
+  // The scheduler runs OUTSIDE requests: its executions pin the post's
+  // tenant (runWithTenant inside PostScheduler.executeOne), so the
+  // ToolContext resolved at fire time is the post's tenant, not a
+  // request's. The executor receives the runtime-equivalent view built
+  // from the SAME components the persistent runtime uses.
+  const schedulerRuntime: AppRuntime = {
+    config,
+    tenant: LOCAL_DEV_TENANT,
+    connection,
+    vault,
+    callBudgets: new BucketRegistry({ capacity: 60, windowMs: 86_400_000 }),
+    provider,
+    mockProvider: undefined,
+    postOps,
+    publishBudgets: new BucketRegistry({ capacity: config.PUBLISH_DAILY_LIMIT, windowMs: 86_400_000 }),
+    storageBackend: exec.kind,
+    authStore,
+    publishBudgetSql,
+    billing,
+    billingStore,
+    readinessExecutor: exec,
+    scheduledPosts: undefined,
+    scheduler: undefined,
+    close: async (): Promise<void> => { /* owned by the real runtime below */ },
+  } satisfies AppRuntime;
+  const scheduler = new PostScheduler({ exec }, {
+    pollMs: 5_000,
+    maxAttempts: 3,
+    now: () => Date.now(),
+    executor: toolExecutor(schedulerRuntime),
+  });
+  void scheduler.recover().then(() => { scheduler.start(); });
   return {
     config,
     tenant: LOCAL_DEV_TENANT,
@@ -260,7 +314,10 @@ export async function buildPersistentRuntime(config: AppConfig): Promise<AppRunt
     billing,
     billingStore,
     readinessExecutor: exec,
+    scheduledPosts,
+    scheduler,
     async close(): Promise<void> {
+      scheduler.stop();
       sweeper?.stop();
       await exec.close();
     },
@@ -473,6 +530,51 @@ function registerPublishTools(server: McpServer, runtime: AppRuntime): void {
   );
 }
 
+function registerScheduleTools(server: McpServer, runtime: AppRuntime): void {
+  server.registerTool(
+    SCHEDULE_TOOL_SPEC.name,
+    {
+      title: SCHEDULE_TOOL_SPEC.title,
+      description: SCHEDULE_TOOL_SPEC.description,
+      inputSchema: SCHEDULE_TOOL_SPEC.inputSchema,
+    },
+    async (args: unknown) => {
+      const ctx = toolContext(runtime);
+      return auditedRun(SCHEDULE_TOOL_SPEC.name, ctx, () =>
+        withBillingGate(runtime, SCHEDULE_TOOL_SPEC.name, () =>
+          schedulePostTool(ctx, SchedulePostInputSchema.parse(args ?? {}), runtime.scheduledPosts, ctx.now))());
+    },
+  );
+  server.registerTool(
+    LIST_SCHEDULED_TOOL_SPEC.name,
+    {
+      title: LIST_SCHEDULED_TOOL_SPEC.title,
+      description: LIST_SCHEDULED_TOOL_SPEC.description,
+      inputSchema: LIST_SCHEDULED_TOOL_SPEC.inputSchema,
+    },
+    async () => {
+      const ctx = toolContext(runtime);
+      return auditedRun(LIST_SCHEDULED_TOOL_SPEC.name, ctx, () =>
+        withBillingGate(runtime, LIST_SCHEDULED_TOOL_SPEC.name, () =>
+          listScheduledPostsTool(ctx, runtime.scheduledPosts))());
+    },
+  );
+  server.registerTool(
+    CANCEL_SCHEDULED_TOOL_SPEC.name,
+    {
+      title: CANCEL_SCHEDULED_TOOL_SPEC.title,
+      description: CANCEL_SCHEDULED_TOOL_SPEC.description,
+      inputSchema: CANCEL_SCHEDULED_TOOL_SPEC.inputSchema,
+    },
+    async (args: unknown) => {
+      const ctx = toolContext(runtime);
+      return auditedRun(CANCEL_SCHEDULED_TOOL_SPEC.name, ctx, () =>
+        withBillingGate(runtime, CANCEL_SCHEDULED_TOOL_SPEC.name, () =>
+          cancelScheduledPostTool(ctx, CancelScheduledPostInputSchema.parse(args ?? {}), runtime.scheduledPosts))());
+    },
+  );
+}
+
 export function createMcpServer(runtime: AppRuntime): McpServer {
   const server = new McpServer({
     name: runtime.config.SERVER_NAME,
@@ -485,6 +587,7 @@ export function createMcpServer(runtime: AppRuntime): McpServer {
   registerConnectionTools(server, runtime);
   registerProfileTools(server, runtime);
   registerPublishTools(server, runtime);
+  registerScheduleTools(server, runtime);
   return server;
 }
 

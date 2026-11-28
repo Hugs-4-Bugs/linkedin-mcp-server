@@ -37,6 +37,9 @@ describe('stdio transport E2E (child process)', () => {
       'linkedin_draft_post',
       'linkedin_preview_post',
       'linkedin_publish_post',
+      'linkedin_schedule_post',
+      'linkedin_list_scheduled_posts',
+      'linkedin_cancel_scheduled_post',
     ]);
   });
 
