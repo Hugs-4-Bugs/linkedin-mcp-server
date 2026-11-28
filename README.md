@@ -21,6 +21,12 @@ This repository is a planning, specification, and agent-operating package for bu
 ## Important limitation
 LinkedIn API availability, permissions, partner program approval, and allowed use are controlled by LinkedIn. The product must not simulate access to unavailable endpoints or use scraping/session-cookie/bypass techniques.
 
+## Scheduling and autonomy (master assignment)
+
+- **Durable post scheduling**: `linkedin_schedule_post` (confirm required) queues a post for future publication that survives server restarts and crashed workers, fires WITHOUT the AI client being connected, and at fire time passes the same safety gates as a manual publish (connection, scope, duplicate window, daily budget, entitlement). `linkedin_list_scheduled_posts` and `linkedin_cancel_scheduled_post` manage the queue. Requires `DATABASE_URL`; in-memory local mode refuses rather than silently losing schedules. Verified end-to-end including a SIGKILL crash-recovery run.
+- **Autonomy tiers** (`src/policy/autonomyTiers.ts`): A read/analyze, B prepare, C autonomous execution (confirmation + durable queue + cancellation + bounded retries), D high-impact (no tools today — LinkedIn API reality; any future tool must classify and gate). Unclassified actions fail closed; external content can never relax a tier.
+- **Audit deliverable**: the full requirements-to-implementation matrix with statuses and external blockers is in [`LinkedIn MCP Blueprint/08_WORKFLOW/REQUIREMENTS_MATRIX.md`](LinkedIn%20MCP%20Blueprint/08_WORKFLOW/REQUIREMENTS_MATRIX.md).
+
 ## Operations (M9/M10)
 
 Hosted SaaS billing (Razorpay TEST mode) and the operational surface are implemented and verified:

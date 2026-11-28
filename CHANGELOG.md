@@ -3,6 +3,36 @@
 All notable changes to linkedin-mcp-server. Format: Keep a Changelog;
 versions follow the roadmap until v1.0.0. Dates are UTC.
 
+## [Unreleased — 2026-11-28] (master assignment: audit, P0/P1 fixes, scheduling, autonomy tiers)
+
+### Fixed (audit findings)
+- METERED_TOOLS parity: four metered tool names omitted the linkedin_
+  prefix and silently collapsed into the 'other' metrics bucket; a
+  bidirectional parity test now guards the catalog (audit P0).
+- PostgresExecutor statement_timeout NEVER applied outside transactions:
+  plain query()/execute() emitted SET LOCAL outside transaction blocks,
+  which PostgreSQL warns about and IGNORES — the per-statement timeout
+  only actually worked inside with(). Now session-level via pool
+  connect + SET LOCAL retained only on the real transaction path; both
+  paths regression-tested with pg_sleep (audit P0, step 21 root cause:
+  87 warnings/run eliminated).
+- Restored BILLING_ARCHITECTURE.md and OPERATIONS_RUNBOOK.md (cited by
+  README/CHANGELOG but removed by the baseline replacement commit).
+
+### Added
+- Durable post scheduling (master assignment steps 12/16):
+  scheduled_posts table (migration m3), claim-based exactly-once worker,
+  bounded retries WITH backoff, restart recovery, cancellation,
+  3 confirmed MCP tools (schedule/list/cancel) — refuses in-memory mode
+  rather than faking durability. 12 tests + live crash-recovery smoke.
+- Autonomy tier model (step 14): A read / B prepare / C autonomous
+  execution / D high-impact; exhaustive classification of every
+  registered tool, fail-closed on unclassified actions, payload-
+  independent decisions (prompt-injection defense at the policy layer).
+  9 tests.
+- REQUIREMENTS_MATRIX.md: the full audit deliverable (20 requirement
+  rows with status/test/security columns + external blockers).
+
 ## [0.10.0] — 2026-11-27 (M9 + M10 — Hosted SaaS, Monetization & Scale/Ops)
 
 ### Added — M9 (issues #13/#14, hosted SaaS & monetization)
