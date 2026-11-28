@@ -89,6 +89,36 @@ describe('PostgresExecutor semantics', () => {
     const got = await exec.query({ sql: 'SELECT tenant_id FROM oauth_states WHERE state = $1', params: ['exec-probe-state'] });
     expect(String(got[0]?.tenant_id)).toBe('tenant-exec');
   });
+  it('statement_timeout actually applies to NON-transactional queries (SET LOCAL regression)', async () => {
+    // Regression for the 'SET LOCAL can only be used in transaction blocks'
+    // warnings: plain query() previously emitted SET LOCAL outside a
+    // transaction, which PostgreSQL IGNORES — the timeout never applied.
+    // Now set session-level at pool connect; a slow statement must abort.
+    const slow = new PostgresExecutor({
+      url: `postgres://lkm:lkm-test@127.0.0.1:${String(PG_PORT)}/${DB_NAME}`,
+      statementTimeoutMs: 500,
+    });
+    try {
+      await expect(
+        slow.query({ sql: "SELECT pg_sleep(3) AS slept" }),
+      ).rejects.toThrow(/statement timeout|canceling|timeout/i);
+    } finally {
+      await slow.close();
+    }
+  });
+  it('statement_timeout applies inside with() transactions (SET LOCAL path)', async () => {
+    const slow = new PostgresExecutor({
+      url: `postgres://lkm:lkm-test@127.0.0.1:${String(PG_PORT)}/${DB_NAME}`,
+      statementTimeoutMs: 500,
+    });
+    try {
+      await expect(
+        slow.with(async (tx) => { await tx.query({ sql: 'SELECT pg_sleep(3) AS slept' }); }),
+      ).rejects.toThrow(/statement timeout|canceling|timeout/i);
+    } finally {
+      await slow.close();
+    }
+  });
   it('with() commits on success and rolls back on throw', async () => {
     await exec.with(async (tx) => {
       await tx.execute({

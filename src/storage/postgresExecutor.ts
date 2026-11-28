@@ -41,6 +41,22 @@ export class PostgresExecutor implements SqlExecutor {
     });
     this.statementTimeoutMs = opts.statementTimeoutMs ?? 10_000;
     // Per-statement timeout so a wedged query cannot hold a checkout forever.
+    // Applied on every pool connection at checkout time via options.Parameter
+    // below AND re-asserted per transaction (SET LOCAL inside BEGIN) — see
+    // with(). Plain query()/execute() get it through the connection's
+    // session default (connectParameters), NOT via SET LOCAL outside a
+    // transaction block (PostgreSQL logs 'SET LOCAL can only be used in
+    // transaction blocks' and silently ignores the value there — the bug
+    // fixed here: the timeout never actually applied to non-transactional
+    // statements).
+    this.pool.on('connect', (client) => {
+      // Session-level default for this pooled connection (races no one:
+      // applied once at connect, before the client returns to service).
+      client.query(`SET statement_timeout = ${String(this.statementTimeoutMs)}`).catch(() => {
+        // Best-effort: if this fails the server default applies; queries
+        // still bound by connectionTimeoutMillis + client socket timeouts.
+      });
+    });
     this.pool.on('error', (err) => {
       log.error('pg pool error', { message: err.message });
     });
@@ -49,7 +65,6 @@ export class PostgresExecutor implements SqlExecutor {
   async query(st: SqlStatement): Promise<SqlResult> {
     const client = await this.pool.connect();
     try {
-      await client.query(`SET LOCAL statement_timeout = ${String(this.statementTimeoutMs)}`);
       const res = await client.query<Record<string, unknown>>(toPg(st));
       // pg types rows as any[]; the executor contract owns the row shape.
       return res.rows;
@@ -61,7 +76,6 @@ export class PostgresExecutor implements SqlExecutor {
   async execute(st: SqlStatement): Promise<number> {
     const client = await this.pool.connect();
     try {
-      await client.query(`SET LOCAL statement_timeout = ${String(this.statementTimeoutMs)}`);
       const res = await client.query<Record<string, unknown>>(toPg(st));
       return res.rowCount ?? 0;
     } finally {
