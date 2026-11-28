@@ -48,7 +48,9 @@ The fine-grained PAT permits: repo read, **issues create**, branch push (git). I
 | Batch | Branch | Findings | Tests before merge | Review | Merged to develop | Issues |
 |---|---|---|---|---|---|---|
 | (baseline) | — | — | 403/403 | — | 30f2007 | — |
-| PR1 | fix/pr1-scheduler-billing-gate (8b6be59) | F1 F2 F3 F4 (#22-#25) | 411/411 (34 files); typecheck/lint/build 0; secret scan clean; crash-smoke 12 PASS lines; http-smoke green | Line-by-line review of 356-line diff: confirmed gate composition audited(gate), tier guard fail-closed incl. zero-arg tools, store guards bidirectional; noted durable:true is a v1 simplification (server-side persistence), documented in code | (this row) | #22-#25 fixed by commits; closure blocked by token |
+| PR1 | fix/pr1-scheduler-billing-gate (8b6be59) | F1 F2 F3 F4 (#22-#25) | 411/411; all gates clean; crash-smoke PASS | Line-by-line review (356 lines) recorded above | 875af31 (merged) | #22-#25 |
+| PR2 | fix/pr2-webhook-retention-engines (e65863d) | F5 F6 F8 (#26 #27 #28) | 415/415 (35 files) | Review: signed-content dedupe collision risk negligible (both bodies need valid HMAC); retention terminal-only; cascade best-effort non-blocking | 4e3c287 (merged) | #26-#28 |
+| PR3 | fix/pr3-scheduler-polish | F11 F12 F13 F14 F16 (#29) | 415/415 | Review: off-by-one corrected (test updated to corrected semantics, documented); watchdog bounded; seam removed | merged after 4e3c287 | #29 |
 
 ## External blockers (unchanged)
 

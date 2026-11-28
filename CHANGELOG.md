@@ -3,6 +3,27 @@
 All notable changes to linkedin-mcp-server. Format: Keep a Changelog;
 versions follow the roadmap until v1.0.0. Dates are UTC.
 
+## [Unreleased — 2026-11-28b] (follow-up program: adversarial audit + PR1/PR2/PR3 remediation)
+
+### Fixed (audit findings #22-#29, all evidence-tested)
+- P0 #22: scheduled posts bypassed the billing entitlement gate — the
+  scheduler executor now passes the SAME withBillingGate + auditedRun
+  wrappers as MCP dispatch (entitlement, quota, audit, metrics at fire time).
+- P1 #23: autonomy tier policy was dead code — now enforced at dispatch
+  (withTierPolicyGuard interposes registerTool; unclassified tools fail closed;
+  tier C/D require confirm:true, payload-independent).
+- P1 #24: cancel/claim race — markPublished/markFailed guarded by status
+  'running'; cancelled-mid-execution rows stay cancelled.
+- P1 #25: scheduler tick errors crashed the process — caught + degraded.
+- P2 #26: webhook dedupe key derived from SIGNED content (header no longer
+  trusted); replays with varied header ids dedupe.
+- P2 #27: engines floor corrected to >=22.5.0 (node:sqlite).
+- P2 #28: scheduled_posts retention (terminal-only, 90d) + disconnect
+  cascade-cancels outstanding schedules.
+- P3 #29: claim off-by-one (maxAttempts REAL executions), SQLite partial
+  index, correct auth_tag derivation, injected backoff clock, execution
+  watchdog, dead seam removal.
+
 ## [Unreleased — 2026-11-28] (master assignment: audit, P0/P1 fixes, scheduling, autonomy tiers)
 
 ### Fixed (audit findings)
