@@ -196,7 +196,7 @@ Security is designed around least privilege, explicit write confirmation and ten
 - **Logging:** bounded, structured, redacted; sensitive payloads and LinkedIn content are not intended for logs.
 - **Audit:** actions and security outcomes are recorded without unnecessary data payloads.
 
-Review [SECURITY.md](SECURITY.md) and the security documentation for reporting instructions and deeper threat/retention details. Never submit credentials or live member data in issues, PRs or test fixtures.
+Review [03_SECURITY/SECURITY_POLICY.md](03_SECURITY/SECURITY_POLICY.md) and [03_SECURITY/DATA_PRIVACY.md](03_SECURITY/DATA_PRIVACY.md) for vulnerability reporting and data-retention details. Never submit credentials or live member data in issues, PRs or test fixtures.
 
 ## Storage and tenancy
 
@@ -428,13 +428,12 @@ The source tree and tests are the definitive description of implementation. This
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development, test gates and DCO sign-off.
 - [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — community conduct.
-- [SECURITY.md](SECURITY.md) and the security-policy documentation — vulnerability reporting and security scope.
+- [03_SECURITY/SECURITY_POLICY.md](03_SECURITY/SECURITY_POLICY.md) — vulnerability reporting and security scope.
 - [NOTICE](NOTICE) — attribution/notices.
 - [LICENSE](LICENSE) — AGPL-3.0-or-later.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
 - [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) — release controls, where present.
-- [08_WORKFLOW/OPERATIONS_RUNBOOK.md](08_WORKFLOW/OPERATIONS_RUNBOOK.md) — operational guidance, where present.
-- [03_SECURITY/THREAT_MODEL.md](03_SECURITY/THREAT_MODEL.md) and [03_SECURITY/DATA_PRIVACY.md](03_SECURITY/DATA_PRIVACY.md) — threat and retention context, where present.
+- [03_SECURITY/DATA_PRIVACY.md](03_SECURITY/DATA_PRIVACY.md) — retention and data handling.
 
 Contribution policy and code of conduct are maintained in their own documents; this README summarizes the project rather than duplicating every governance requirement.
 
