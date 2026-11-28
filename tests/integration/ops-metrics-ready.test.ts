@@ -78,11 +78,11 @@ describe('MetricsRegistry unit semantics', () => {
 
   it('tool outcome counters are per-tool', () => {
     const m = new MetricsRegistry();
-    m.toolCall('publish_post', 'ok');
-    m.toolCall('publish_post', 'error');
+    m.toolCall('linkedin_publish_post', 'ok');
+    m.toolCall('linkedin_publish_post', 'error');
     const text = m.render();
-    expect(text).toContain('lkm_mcp_tool_calls_total{tool="publish_post",outcome="ok"} 1');
-    expect(text).toContain('lkm_mcp_tool_calls_total{tool="publish_post",outcome="error"} 1');
+    expect(text).toContain('lkm_mcp_tool_calls_total{tool="linkedin_publish_post",outcome="ok"} 1');
+    expect(text).toContain('lkm_mcp_tool_calls_total{tool="linkedin_publish_post",outcome="error"} 1');
   });
 });
 
@@ -229,5 +229,35 @@ describe('/ready on the real server', () => {
     expect(r.status).toBe(405);
     const m = await fetch(`http://127.0.0.1:${String(PORT_SQLITE)}/metrics`, { method: 'POST' });
     expect(m.status).toBe(405);
+  });
+});
+
+/* ---------- Audit regression: metered tools must match the registered catalog ---------- */
+
+describe('METERED_TOOLS parity with the registered tool catalog', () => {
+  it('every registered tool is metered under its exact name (no silent "other" collapse)', async () => {
+    const { Client } = await import('@modelcontextprotocol/client');
+    const { InMemoryTransport } = await import('@modelcontextprotocol/server');
+    const { buildRuntime, createMcpServer } = await import('../../src/mcp/serverFactory.js');
+    const { parseConfig } = await import('../../src/config/config.js');
+    const { METERED_TOOLS } = await import('../../src/observability/metrics.js');
+    const server = createMcpServer(buildRuntime(parseConfig({ ENVIRONMENT: 'local' })));
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await server.connect(st);
+    const client = new Client({ name: 'parity', version: '1.0.0' });
+    await client.connect(ct);
+    const tools = await client.listTools();
+    await client.close();
+    await server.close();
+    const registered = tools.tools.map((t) => t.name).sort();
+    expect(registered.length).toBeGreaterThan(0);
+    // Every registered tool must be metered by its EXACT name.
+    for (const name of registered) {
+      expect(METERED_TOOLS).toContain(name);
+    }
+    // And the allowlist must not carry dead names either.
+    for (const metered of METERED_TOOLS) {
+      expect(registered).toContain(metered);
+    }
   });
 });

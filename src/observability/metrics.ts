@@ -29,16 +29,22 @@
 export type MetricOutcome = 'ok' | 'error';
 export type RouteClass = '/mcp' | '/auth' | '/admin' | '/healthz' | '/ready' | '/metrics' | '/webhooks' | '/api/billing' | '/linkedin' | 'other';
 
-/** Fixed tool-name allowlist: the registered catalog (bounded labels). */
+/**
+ * Fixed tool-name allowlist: the registered catalog (bounded labels).
+ * Audit defect fix (2026-11-28): four names previously omitted the
+ * linkedin_ prefix used by the REGISTERED tool names, so those tools
+ * silently collapsed into the 'other' bucket. Names must now match the
+ * registered catalog exactly; the ops tests enforce the parity.
+ */
 export const METERED_TOOLS: readonly string[] = [
   'linkedin_connect',
   'linkedin_status',
   'linkedin_disconnect',
-  'get_my_profile',
-  'list_granted_scopes',
-  'draft_post',
-  'preview_post',
-  'publish_post',
+  'linkedin_get_my_profile',
+  'linkedin_list_granted_scopes',
+  'linkedin_draft_post',
+  'linkedin_preview_post',
+  'linkedin_publish_post',
   'status',
 ] as const;
 
