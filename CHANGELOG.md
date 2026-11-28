@@ -3,6 +3,16 @@
 All notable changes to linkedin-mcp-server. Format: Keep a Changelog;
 versions follow the roadmap until v1.0.0. Dates are UTC.
 
+## [Unreleased — 2026-11-28d] (next-execution: §7 tool annotations + §8 Agent Skills)
+
+### Added
+- MCP tool annotations on every registered tool (readOnlyHint /
+  destructiveHint / idempotentHint), derived from each tool's ToolPolicy.
+- Server initialize-time instructions pointing agents at the skills.
+- Three curated Agent Skills (official SKILL.md format, validated by
+  tests/security/agent-skills.test.ts): linkedin-publishing,
+  linkedin-post-scheduling, linkedin-connection-troubleshooting.
+
 ## [Unreleased — 2026-11-28c] (next-execution program: independent verification + PR4 + README identity)
 
 ### Fixed (fresh audit, issue #32)

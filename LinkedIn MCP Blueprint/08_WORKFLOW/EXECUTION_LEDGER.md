@@ -65,6 +65,14 @@ Live LinkedIn validation (owner credentials), Razorpay live mode (owner decision
 
 - 2026-11-28 (push-protection, CAUGHT): one tracked helper script (`scripts/gh-issue-helper.sh`, in ledger commit 9b26ea4) embedded the PAT literal. GitHub push protection rejected the push; the commit NEVER reached the remote (verified: remote develop == 30f2007 throughout). Remediation: history rewritten locally (develop reset to 8b6be59 pre-push; secret never published), script rewritten to env-var-only, all other scripts verified env-only (0 literal hits), full-repo scan clean. The PAT remains in sandbox env only. Token rotation is the owner's call; since the secret never left the sandbox, exposure = local-only. (Also: the PAT has proven read-mostly permissions; see capability map above.)
 
+### next-execution batch 2026-11-28d — final state
+
+- **PR5** (`fix/pr5-tool-annotations`, de75b24): MCP tool annotations on all 11 tools (readOnly/destructive/idempotent from ToolPolicy SSoT) + server initialize-time instructions; three curated Agent Skills (`skills/linkedin-publishing`, `skills/linkedin-post-scheduling`, `skills/linkedin-connection-troubleshooting`) tracked in-repo (.gitignore whitelist) and validated by `tests/security/agent-skills.test.ts` (8 tests: format rules, real-catalog tool references, negation-only restricted-surface mentions).
+- **develop = 0beec0f** (remote verified). Final verification: **428/428 tests, 37 files**; typecheck 0; eslint 0; build 0; `npm audit --omit=dev` 0 vulnerabilities; secret scan clean; stdio/http/schedule-restart smokes all exit 0.
+- README rewritten to the verified identity (functioning MCP server with documented limitations; Node floor 22.5+ everywhere; the develop-vs-main contradiction closed).
+- Issues: #32 remediated with completion evidence recorded as #33 (token cannot comment/close — owner action).
+- Skipped work (explicit): MCP catalog z.object-registration migration (deferred, unrelated to defects); /metrics proxy restriction (posture documented; operator-side config); docker-compose password URL-encoding edge (documented in #32; low practical risk).
+
 ## Next actionable task
 
-(next-execution batch 2026-11-28c): §7 tool-quality review + §8 Agent Skills, then final report.
+Owner actions only: close #22-#29 + #32/#33 after reviewing evidence; delete probe issue #30; optional PAT rotation (exposure was sandbox-local only). Engineering work on develop is complete for this batch.
