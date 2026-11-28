@@ -57,7 +57,7 @@ export function validatePostText(text: string): string {
   // C0/C1 control characters would be rejected or mangled by the API;
   // reject locally so the exact request never leaves the process.
   // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f-\u009f]/.test(text)) {
+  if (/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/.test(text)) {
     throw new PostValidationError(
       'control-chars',
       'Post text contains control characters',
@@ -95,7 +95,7 @@ export function reportPostText(text: string): PostValidationReport {
     });
   }
   // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f-\u009f]/.test(text)) {
+  if (/[\u0000-\u0008\u000e-\u001f\u007f-\u009f]/.test(text)) {
     valid = false;
     problems.push({ code: 'control-chars', message: 'Post text contains control characters' });
   }

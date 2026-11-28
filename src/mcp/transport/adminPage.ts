@@ -258,11 +258,28 @@ async function mcpCall(id, method, params) {
     'content-type': 'application/json',
     'accept': 'application/json, text/event-stream',
     'mcp-protocol-version': '2026-07-28',
+    'Mcp-Method': method,
   };
+  if (method === 'tools/call' && params && params.name) {
+    headers['Mcp-Name'] = params.name;
+  }
   if (mcpSession) headers['mcp-session-id'] = mcpSession;
+
+  const requestParams = {
+    ...(params || {}),
+    _meta: {
+      'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+      'io.modelcontextprotocol/clientCapabilities': {},
+      'io.modelcontextprotocol/clientInfo': {
+        name: 'lkm-console',
+        version: '1.0.0',
+      },
+    },
+  };
+
   const r = await fetch('/mcp', {
     method: 'POST', credentials: 'same-origin', headers,
-    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: params || {} }),
+    body: JSON.stringify({ jsonrpc: '2.0', id, method, params: requestParams }),
   });
   if (r.status !== 200) {
     const t = await r.text().catch(() => '');
